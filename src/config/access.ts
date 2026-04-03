@@ -99,8 +99,10 @@ export class AccessControl {
     } catch {
       // corrupted config — use defaults
     }
+    const defaults = { ...DEFAULT_CONFIG };
+    this.config = defaults;
     this.save();
-    return { ...DEFAULT_CONFIG };
+    return defaults;
   }
 
   private save(): void {

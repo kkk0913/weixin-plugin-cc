@@ -20,7 +20,7 @@ import { WeixinClient } from './weixin/api.js';
 import { MessageType, type MessageItem, type WeixinMessage } from './weixin/types.js';
 import { downloadMedia } from './weixin/media.js';
 import { AccessControl } from './config/access.js';
-import { chunkText, safeName, sleep } from './util/helpers.js';
+import { chunkText, safeName, sleep, assertSendable } from './util/helpers.js';
 import type { AccountConfig } from './weixin/types.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -212,7 +212,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 
         // Send files as separate messages
         for (const f of files) {
-          assertSendable(f);
+          assertSendable(f, STATE_DIR);
           const st = statSync(f);
           if (st.size > 50 * 1024 * 1024) {
             throw new Error(`file too large: ${f} (${(st.size / 1024 / 1024).toFixed(1)}MB, max 50MB)`);
@@ -294,24 +294,6 @@ const access = new AccessControl(STATE_DIR);
 // context_token per user — maintains conversation continuity
 const contextTokens = new Map<string, string>();
 
-// ─── Sendable Assertion ─────────────────────────────────────────────
-
-function assertSendable(filePath: string): void {
-  const { realpathSync } = require('node:fs');
-  let real: string;
-  let stateReal: string;
-  try {
-    real = realpathSync(filePath);
-    stateReal = realpathSync(STATE_DIR);
-  } catch {
-    return;
-  }
-  const inbox = join(stateReal, 'inbox');
-  if (real.startsWith(stateReal + '/') && !real.startsWith(inbox + '/')) {
-    throw new Error(`refusing to send channel state: ${filePath}`);
-  }
-}
-
 // ─── Message Handling ───────────────────────────────────────────────
 
 function extractTextContent(msg: WeixinMessage): string | null {
@@ -386,16 +368,14 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
       } catch (e) {
         process.stderr.write(`wechat channel: image download failed: ${e}\n`);
       }
-    } else if (
-      (item.type === MessageType.FILE || item.type === MessageType.VOICE || item.type === MessageType.VIDEO) &&
-      item.media
-    ) {
-      // Store CDN media ref as JSON for on-demand download via download_attachment
-      attachmentFileId = JSON.stringify(item.media);
-      attachmentName =
-        safeName(item.file_item?.file_name) ??
-        safeName(item.voice_item?.text) ??
-        undefined;
+    } else if (item.type === MessageType.FILE && item.file_item?.media) {
+      attachmentFileId = JSON.stringify(item.file_item.media);
+      attachmentName = safeName(item.file_item.file_name) ?? undefined;
+    } else if (item.type === MessageType.VOICE && item.voice_item?.media) {
+      attachmentFileId = JSON.stringify(item.voice_item.media);
+      attachmentName = safeName(item.voice_item.text) ?? undefined;
+    } else if (item.type === MessageType.VIDEO && item.video_item?.media) {
+      attachmentFileId = JSON.stringify(item.video_item.media);
     }
   }
 
@@ -508,7 +488,9 @@ async function main(): Promise<void> {
   } else {
     process.stderr.write('wechat channel: no saved session, starting QR login\n');
     try {
-      const config = await client.loginWithQr();
+      const config = await client.loginWithQr(url => {
+        process.stderr.write(`wechat channel: scan QR to login:\n${url}\n`);
+      });
       saveAccount(config);
       process.stderr.write('wechat channel: login successful, session saved\n');
     } catch (err) {

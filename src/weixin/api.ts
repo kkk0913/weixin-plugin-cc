@@ -66,21 +66,25 @@ export class WeixinClient {
    * Full QR login flow: get QR → poll status → return AccountConfig.
    * Throws on timeout or error.
    */
-  async loginWithQr(): Promise<AccountConfig> {
+  async loginWithQr(onQrUrl?: (url: string) => void): Promise<AccountConfig> {
     // Step 1: get QR code
-    const qrResp = await this.post<LoginQrResp>('/ilinkww/cla/bot/get_bot_qrcode', {
+    const qrResp = await this.post<LoginQrResp>('/ilink/bot/get_bot_qrcode?bot_type=3', {
       base_info: this.baseInfo,
     });
     if (qrResp.ret !== 0) {
       throw new Error(`Failed to get QR code: ${qrResp.errmsg} (${qrResp.ret})`);
     }
 
-    // Notify caller with QR image — the MCP server will handle display
+    // Notify caller with QR image
+    if (onQrUrl && qrResp.qrcode_img_content) {
+      onQrUrl(qrResp.qrcode_img_content);
+    }
+
     // Step 2: poll for scan/confirm
     const maxAttempts = 120; // 2 minutes at 1s intervals
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 1000));
-      const status = await this.post<QrStatusResp>('/ilinkww/cla/bot/get_qrcode_status', {
+      const status = await this.post<QrStatusResp>('/ilink/bot/get_qrcode_status', {
         qrcode: qrResp.qrcode,
         base_info: this.baseInfo,
       });
@@ -102,7 +106,8 @@ export class WeixinClient {
         throw new Error('QR code expired');
       }
 
-      if (status.ret !== 0 && status.ret !== -1) {
+      // ret: 0 = ok, 1 = waiting for scan/confirm, -1 = in progress
+      if (status.ret !== 0 && status.ret !== 1 && status.ret !== -1) {
         throw new Error(`QR status error: ${status.errmsg} (${status.ret})`);
       }
     }
@@ -118,7 +123,7 @@ export class WeixinClient {
       base_info: this.baseInfo,
     };
     return this.post<GetUpdatesResp>(
-      '/ilinkww/cla/bot/get_updates',
+      '/ilink/bot/getupdates',
       body,
       LONG_POLL_TIMEOUT_MS,
     );
@@ -147,7 +152,7 @@ export class WeixinClient {
       context_token: contextToken,
     };
     const body: SendMessageReq = { msg, base_info: this.baseInfo };
-    return this.post<SendMessageResp>('/ilinkww/cla/bot/send_msg', body);
+    return this.post<SendMessageResp>('/ilink/bot/sendmessage', body);
   }
 
   /**
@@ -159,7 +164,7 @@ export class WeixinClient {
       typing_ticket: typingTicket,
       status: 1, // TYPING
     };
-    await this.post('/ilinkww/cla/bot/send_typing', body);
+    await this.post('/ilink/bot/sendtyping', body);
   }
 
   /**
@@ -171,14 +176,14 @@ export class WeixinClient {
       context_token: contextToken,
       base_info: this.baseInfo,
     };
-    return this.post<GetConfigResp>('/ilinkww/cla/bot/get_config', body);
+    return this.post<GetConfigResp>('/ilink/bot/getconfig', body);
   }
 
   /**
    * Get upload URL for CDN media.
    */
   async getUploadUrl(req: GetUploadUrlReq): Promise<GetUploadUrlResp> {
-    return this.post<GetUploadUrlResp>('/ilinkww/cla/bot/get_upload_url', {
+    return this.post<GetUploadUrlResp>('/ilink/bot/getuploadurl', {
       ...req,
       base_info: this.baseInfo,
     });

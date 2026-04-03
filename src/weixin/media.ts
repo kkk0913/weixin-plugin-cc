@@ -55,7 +55,7 @@ export async function uploadMedia(
   const uploadUrl = uploadResp.upload_full_url;
 
   const form = new FormData();
-  form.append('file', new Blob([encrypted]), uploadParam.name ?? 'file');
+  form.append('file', new Blob([new Uint8Array(encrypted)]), uploadParam.name ?? 'file');
 
   const resp = await fetch(uploadUrl, {
     method: 'POST',
