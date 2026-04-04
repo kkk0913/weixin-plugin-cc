@@ -1,11 +1,5 @@
 {
   "name": "wechat",
   "version": "1.0.0",
-  "description": "WeChat channel for Claude Code — bridge WeChat messages via openclaw-weixin API",
-  "mcpServers": {
-    "wechat": {
-      "command": "npx",
-      "args": ["tsx", "./src/server.ts"]
-    }
-  }
+  "description": "WeChat channel for Claude Code — bridge WeChat messages via openclaw-weixin API"
 }
