@@ -1,0 +1,14 @@
+{
+  "name": "local-weixin",
+  "owner": {
+    "name": "local"
+  },
+  "plugins": [
+    {
+      "name": "wechat",
+      "source": "./",
+      "description": "WeChat channel for Claude Code",
+      "version": "1.0.0"
+    }
+  ]
+}
