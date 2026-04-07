@@ -72,22 +72,37 @@ offer.
 
 ### `login` — trigger browser login
 
-1. If `~/.claude/channels/weixin/account.json` exists, tell the user:
-   *"A saved session already exists. To force a fresh login, run
-   `/weixin:configure clear` first, then `/weixin:configure login` again."*
-   and stop.
+**This command triggers the login flow immediately** — no restart needed.
 
-2. If no saved session exists, tell the user:
-   *"Run `/reload-plugins` to restart the weixin server. A browser login link will
-   appear in the server's stderr output — open it in your browser, then scan with WeChat
-   within 8 minutes. After scanning, confirm on your phone. The session will be
-   saved automatically."*
+1. Check if `~/.claude/channels/weixin/account.json` exists:
+   - If yes and `$ARGUMENTS` contains `--force`: proceed to step 2
+   - If yes without `--force`: tell the user *"Already logged in. Use `/weixin:configure login --force` to re-login."* and stop.
+   - If no: proceed to step 2
+
+2. Create trigger file to signal the server to start login:
+   ```bash
+   mkdir -p ~/.claude/channels/weixin
+   echo "login" > ~/.claude/channels/weixin/.login-trigger
+   ```
+
+3. Tell the user: *"Login triggered. The browser link will appear in the output above. Open it in your browser, scan with WeChat, and confirm on your phone within 8 minutes."*
+
+### `relogin` — force re-login
+
+Same as `login --force`. Clears existing session and starts fresh login.
+
+1. Delete `~/.claude/channels/weixin/account.json` if exists.
+2. Create trigger file: `echo "login" > ~/.claude/channels/weixin/.login-trigger`
+3. Tell the user: *"Session cleared and login triggered. Watch for the browser link above."*
 
 ### `clear` — remove saved session
 
 1. Delete `~/.claude/channels/weixin/account.json` if it exists.
-2. Tell the user: *"Session cleared. Run `/weixin:configure login` to
-   start a fresh QR login."*
+2. Tell the user: *"Session cleared. Run `/weixin:configure login` to start a fresh login."*
+
+### `--help` — show usage
+
+Show all available commands and their descriptions.
 
 ---
 

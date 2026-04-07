@@ -13,7 +13,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { readFileSync, writeFileSync, mkdirSync, statSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, statSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { WeixinClient } from './weixin/api.js';
@@ -28,6 +28,7 @@ import type { AccountConfig, CDNMedia } from './weixin/types.js';
 const STATE_DIR = join(homedir(), '.claude', 'channels', 'weixin');
 const INBOX_DIR = join(STATE_DIR, 'inbox');
 const ACCOUNT_FILE = join(STATE_DIR, 'account.json');
+const LOGIN_TRIGGER_FILE = join(STATE_DIR, '.login-trigger');
 const MAX_CHUNK_LIMIT = 2048; // WeChat text limit ~2048 chars
 
 // Opaque handle registry for safe media downloads (prevents SSRF)
@@ -542,6 +543,26 @@ function cancelLogin(): void {
   process.stderr.write('weixin channel: login cancelled\n');
 }
 
+// ─── Login Trigger ──────────────────────────────────────────────────
+
+let loginTriggerCallback: (() => void) | null = null;
+
+function setLoginTriggerCallback(cb: () => void): void {
+  loginTriggerCallback = cb;
+}
+
+function checkLoginTrigger(): boolean {
+  try {
+    if (existsSync(LOGIN_TRIGGER_FILE)) {
+      unlinkSync(LOGIN_TRIGGER_FILE);
+      return true;
+    }
+  } catch {
+    // Ignore errors
+  }
+  return false;
+}
+
 // ─── Polling Loop ───────────────────────────────────────────────────
 
 let polling = true;
@@ -550,8 +571,16 @@ let sessionExpired = false;
 
 async function pollLoop(): Promise<void> {
   let cursor = '';
+  let checkCount = 0;
 
   while (polling) {
+    // Check for login trigger every 5 iterations (~5 seconds)
+    if (++checkCount % 5 === 0 && checkLoginTrigger() && loginTriggerCallback) {
+      process.stderr.write('weixin channel: login triggered by user\n');
+      loginTriggerCallback();
+      return;
+    }
+
     try {
       const resp = await client.getUpdates(cursor);
 
@@ -617,13 +646,15 @@ async function runWithAutoReLogin(): Promise<void> {
     polling = true;
     await pollLoop();
 
-    if (!sessionExpired) {
-      // Polling stopped for other reasons
+    if (!sessionExpired && !checkLoginTrigger()) {
+      // Polling stopped for other reasons (not session expiry or login trigger)
       break;
     }
 
-    // Session expired, try to re-login
-    process.stderr.write('weixin channel: attempting automatic re-login...\n');
+    // Session expired or login triggered, try to re-login
+    if (sessionExpired) {
+      process.stderr.write('weixin channel: attempting automatic re-login...\n');
+    }
     try {
       await startBrowserLogin();
       process.stderr.write('weixin channel: re-login successful, resuming...\n');
@@ -631,7 +662,6 @@ async function runWithAutoReLogin(): Promise<void> {
       process.stderr.write(`weixin channel: automatic re-login failed: ${err}\n`);
       // Clear expired session
       try {
-        const { unlinkSync } = await import('node:fs');
         unlinkSync(ACCOUNT_FILE);
         process.stderr.write('weixin channel: cleared expired session\n');
       } catch {
@@ -642,12 +672,33 @@ async function runWithAutoReLogin(): Promise<void> {
   }
 }
 
+async function waitForLoginTrigger(): Promise<void> {
+  process.stderr.write(
+    '\n╔══════════════════════════════════════════════════════════╗\n' +
+    '║  WeChat channel: waiting for login                       ║\n' +
+    '╠══════════════════════════════════════════════════════════╣\n' +
+    '║  Run /weixin:configure login to start login flow         ║\n' +
+    '╚══════════════════════════════════════════════════════════╝\n\n'
+  );
+
+  // Wait for trigger file
+  while (!checkLoginTrigger()) {
+    await sleep(1000);
+  }
+}
+
 async function main(): Promise<void> {
   await mcp.connect(new StdioServerTransport());
   process.stderr.write('weixin channel: MCP connected\n');
 
+  // Set up login trigger callback
+  setLoginTriggerCallback(() => {
+    polling = false; // Stop current polling
+  });
+
   // Check for saved account
   const saved = loadAccount();
+
   if (saved) {
     client.setAuth(saved);
     process.stderr.write('weixin channel: restored saved session\n');
@@ -659,18 +710,20 @@ async function main(): Promise<void> {
     process.stderr.write('weixin channel: starting message poll\n');
     await runWithAutoReLogin();
   } else {
-    // No saved session — start browser login
-    process.stderr.write(
-      'weixin channel: no saved session. Starting browser login...\n',
-    );
-    startBrowserLogin()
-      .then(() => {
-        process.stderr.write('weixin channel: login complete, starting message poll\n');
-        return runWithAutoReLogin();
-      })
-      .catch(err => {
-        process.stderr.write(`weixin channel: login failed: ${err}\n`);
-      });
+    // No saved session — wait for login trigger from skill
+    await waitForLoginTrigger();
+  }
+
+  // After polling stops, check if we need to login or re-login
+  if (checkLoginTrigger() || sessionExpired) {
+    try {
+      await startBrowserLogin();
+      process.stderr.write('weixin channel: login complete, starting message poll\n');
+      await runWithAutoReLogin();
+    } catch (err) {
+      process.stderr.write(`weixin channel: login failed: ${err}\n`);
+      process.stderr.write('weixin channel: run /weixin:configure login to retry\n');
+    }
   }
 }
 
