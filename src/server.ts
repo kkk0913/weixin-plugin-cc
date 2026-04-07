@@ -28,8 +28,28 @@ import type { AccountConfig, CDNMedia } from './weixin/types.js';
 const STATE_DIR = join(homedir(), '.claude', 'channels', 'weixin');
 const INBOX_DIR = join(STATE_DIR, 'inbox');
 const ACCOUNT_FILE = join(STATE_DIR, 'account.json');
+const CURSOR_FILE = join(STATE_DIR, '.cursor');
 const LOGIN_TRIGGER_FILE = join(STATE_DIR, '.login-trigger');
 const MAX_CHUNK_LIMIT = 2048; // WeChat text limit ~2048 chars
+
+// ─── Cursor Persistence ─────────────────────────────────────────────
+
+function loadCursor(): string {
+  try {
+    return readFileSync(CURSOR_FILE, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function saveCursor(cursor: string): void {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(CURSOR_FILE, cursor, { mode: 0o600 });
+  } catch {
+    // Ignore errors
+  }
+}
 
 // Opaque handle registry for safe media downloads (prevents SSRF)
 const mediaHandles = new Map<string, CDNMedia>();
@@ -570,8 +590,11 @@ let consecutiveErrors = 0;
 let sessionExpired = false;
 
 async function pollLoop(): Promise<void> {
-  let cursor = '';
+  // Load cursor from file (persistent across restarts)
+  let cursor = loadCursor();
   let checkCount = 0;
+
+  process.stderr.write(`weixin channel: starting poll with cursor: ${cursor ? 'loaded' : 'empty'}\n`);
 
   while (polling) {
     // Check for login trigger every 5 iterations (~5 seconds)
@@ -584,6 +607,7 @@ async function pollLoop(): Promise<void> {
     try {
       const resp = await client.getUpdates(cursor);
 
+      // Check for errors
       if (resp.ret != null && resp.ret !== 0) {
         if (resp.errcode === -14) {
           process.stderr.write(
@@ -599,17 +623,22 @@ async function pollLoop(): Promise<void> {
 
       consecutiveErrors = 0;
 
+      // Update and save cursor for next request
       if (resp.get_updates_buf) {
         cursor = resp.get_updates_buf;
+        saveCursor(cursor);
       }
 
-      if (resp.longpolling_timeout_ms) {
-        // Server told us the next poll timeout
+      // Process messages
+      const msgs = resp.msgs ?? [];
+      if (msgs.length > 0) {
+        process.stderr.write(`weixin channel: received ${msgs.length} message(s)\n`);
       }
 
-      for (const msg of resp.msgs ?? []) {
+      for (const msg of msgs) {
         // Skip bot messages (kind=2)
         if (msg.message_type === 2) continue;
+        process.stderr.write(`weixin channel: processing message from ${msg.from_user_id}\n`);
         await handleInbound(msg);
       }
     } catch (err) {
