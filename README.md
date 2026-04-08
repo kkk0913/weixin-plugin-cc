@@ -1,4 +1,6 @@
-# claude-channel-weixin
+# weixin-plugin-cc
+
+[![中文](https://img.shields.io/badge/README-中文-blue)](README.zh-CN.md)
 
 WeChat channel plugin for Claude Code — bridge WeChat messages to Claude Code via MCP.
 
@@ -14,18 +16,27 @@ WeChat channel plugin for Claude Code — bridge WeChat messages to Claude Code 
 
 ## Installation
 
-Install from GitHub via Claude Code plugin marketplace:
+Add the marketplace in Claude Code:
 
-```bash
-claude plugin install github:kkk0913/claude-channel-weixin
+```
+/plugin marketplace add kkk0913/weixin-plugin-cc
 ```
 
-Or clone and install locally:
+Install the plugin:
 
-```bash
-git clone https://github.com/kkk0913/claude-channel-weixin.git
-cd claude-channel-weixin
 ```
+/plugin install weixin@weixin-plugin-cc
+```
+
+Reload plugins.
+
+> **Note:** This is a channel plugin. You must start Claude Code with the development channels flag:
+>
+> ```
+> claude --dangerously-load-development-channels plugin:weixin@weixin-plugin-cc
+> ```
+>
+> Without this flag, WeChat messages will not be delivered to Claude Code.
 
 ## First Run
 

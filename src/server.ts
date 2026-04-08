@@ -30,7 +30,15 @@ const INBOX_DIR = join(STATE_DIR, 'inbox');
 const ACCOUNT_FILE = join(STATE_DIR, 'account.json');
 const CURSOR_FILE = join(STATE_DIR, '.cursor');
 const LOGIN_TRIGGER_FILE = join(STATE_DIR, '.login-trigger');
+const LOG_FILE = join(STATE_DIR, 'debug.log');
 const MAX_CHUNK_LIMIT = 2048; // WeChat text limit ~2048 chars
+
+import { appendFileSync } from 'node:fs';
+function debugLog(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  process.stderr.write(line);
+  try { appendFileSync(LOG_FILE, line); } catch {}
+}
 
 // ─── Cursor Persistence ─────────────────────────────────────────────
 
@@ -113,6 +121,7 @@ const pendingPermissions = new Map<
   string,
   { tool_name: string; description: string; input_preview: string }
 >();
+let latestPermissionRequestId: string | null = null;
 
 mcp.setNotificationHandler(
   z.object({
@@ -127,6 +136,7 @@ mcp.setNotificationHandler(
   async ({ params }) => {
     const { request_id, tool_name, description, input_preview } = params;
     pendingPermissions.set(request_id, { tool_name, description, input_preview });
+    latestPermissionRequestId = request_id;
 
     // Send permission request to all allowed users as text messages
     access.reload();
@@ -134,7 +144,7 @@ mcp.setNotificationHandler(
       const text =
         `Permission: ${tool_name}\n` +
         `${description}\n\n` +
-        `Reply: yes ${request_id} or no ${request_id}`;
+        `Reply: yes or no`;
       await client
         .sendMessage(userId, contextTokens.get(userId) ?? '', {
           type: MessageType.TEXT,
@@ -341,10 +351,12 @@ function extractTextContent(msg: WeixinMessage): string | null {
 
 async function handleInbound(msg: WeixinMessage): Promise<void> {
   const userId = msg.from_user_id;
+  debugLog(`handleInbound: from=${userId} type=${msg.message_type}`);
 
   // Gate check (reload from disk for cross-process consistency)
   access.reload();
   const gateResult = access.gate(userId);
+  debugLog(`handleInbound: gate=${JSON.stringify(gateResult)}`);
   if (gateResult.action === 'drop') return;
 
   if (gateResult.action === 'pair') {
@@ -399,20 +411,11 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
   const text = extractTextContent(msg);
   if (!text && !imagePath && !attachmentFileId) return;
 
-  // Permission-reply intercept: "yes <hex>" or "no <hex>"
+  // Permission-reply intercept: bare "yes" or "no"
   if (text) {
-    const permMatch = /^\s*(y|yes|n|no)\s+([0-9a-f]{6})\s*$/i.exec(text);
-    if (permMatch) {
-      const requestId = permMatch[2]!.toLowerCase();
-      if (!pendingPermissions.has(requestId)) {
-        await client
-          .sendMessage(userId, msg.context_token, {
-            type: MessageType.TEXT,
-            text_item: { text: 'Unknown or expired permission request.' },
-          })
-          .catch(() => {});
-        return;
-      }
+    const permMatch = /^\s*(y|yes|n|no)\s*$/i.exec(text);
+    if (permMatch && latestPermissionRequestId) {
+      const requestId = latestPermissionRequestId;
       const behavior = permMatch[1]!.toLowerCase().startsWith('y') ? 'allow' : 'deny';
       mcp.notification({
         method: 'notifications/claude/channel/permission',
@@ -421,7 +424,8 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
         process.stderr.write(`weixin channel: permission notify failed: ${err}\n`);
       });
       pendingPermissions.delete(requestId);
-      const ack = behavior === 'allow' ? 'Allowed' : 'Denied';
+      latestPermissionRequestId = null;
+      const ack = behavior === 'allow' ? 'Allowed ✓' : 'Denied ✗';
       await client
         .sendMessage(userId, msg.context_token, {
           type: MessageType.TEXT,
@@ -445,8 +449,8 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
   }
 
   // Deliver to Claude Code
-  mcp.notification({
-    method: 'notifications/claude/channel',
+  const notifPayload = {
+    method: 'notifications/claude/channel' as const,
     params: {
       content: text,
       meta: {
@@ -459,8 +463,12 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
         ...(attachmentName ? { attachment_name: attachmentName } : {}),
       },
     },
+  };
+  debugLog(`delivering to Claude: ${JSON.stringify(notifPayload)}`);
+  mcp.notification(notifPayload).then(() => {
+    debugLog(`notification sent OK`);
   }).catch(err => {
-    process.stderr.write(`weixin channel: failed to deliver inbound: ${err}\n`);
+    debugLog(`failed to deliver inbound: ${err}`);
   });
 }
 
@@ -631,14 +639,12 @@ async function pollLoop(): Promise<void> {
 
       // Process messages
       const msgs = resp.msgs ?? [];
-      if (msgs.length > 0) {
-        process.stderr.write(`weixin channel: received ${msgs.length} message(s)\n`);
-      }
+      debugLog(`poll: got ${msgs.length} msg(s), ret=${resp.ret}, errcode=${resp.errcode}`);
 
       for (const msg of msgs) {
         // Skip bot messages (kind=2)
-        if (msg.message_type === 2) continue;
-        process.stderr.write(`weixin channel: processing message from ${msg.from_user_id}\n`);
+        if (msg.message_type === 2) { debugLog(`skip bot msg type=${msg.message_type}`); continue; }
+        debugLog(`processing msg from ${msg.from_user_id}, text=${msg.item_list?.[0]?.text_item?.text}`);
         await handleInbound(msg);
       }
     } catch (err) {
@@ -717,7 +723,9 @@ async function waitForLoginTrigger(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  debugLog('server starting...');
   await mcp.connect(new StdioServerTransport());
+  debugLog('MCP connected');
   process.stderr.write('weixin channel: MCP connected\n');
 
   // Set up login trigger callback
