@@ -67,7 +67,7 @@ export class AccessControl {
     }
 
     // New user — generate pairing code
-    const code = randomBytes(3).toString('hex');
+    const code = randomBytes(5).toString('hex');
     this.config.pendingUsers[userId] = code;
     this.save();
     return { action: 'pair', code };

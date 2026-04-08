@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
+// AES-128-ECB is required here because WeChat's CDN media protocol uses ECB payloads.
 const ALGORITHM = 'aes-128-ecb';
 const KEY_LENGTH = 16;
 

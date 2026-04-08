@@ -4,6 +4,8 @@
 
 WeChat channel plugin for Claude Code — bridge WeChat messages to Claude Code via MCP.
 
+> **Credits:** This project was primarily built by **MiMo-Pro** and **Kimi-2.5**, with **Opus** serving as the quality inspector who shows up at the end, squints at the code, and says "hmm, let me fix that for you." Think of it as two enthusiastic interns writing the whole app while a senior architect reviews from a comfy chair. The result? A surprisingly functional WeChat bridge that none of them can actually use — because none of them have a WeChat account.
+
 ## Features
 
 - **QR code login** — scan to login, session saved and auto-restored across restarts

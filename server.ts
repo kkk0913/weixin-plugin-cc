@@ -16,23 +16,102 @@ import { z } from 'zod';
 import { readFileSync, writeFileSync, mkdirSync, statSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { WeixinClient } from './weixin/api.js';
-import { MessageType, type MessageItem, type WeixinMessage } from './weixin/types.js';
-import { downloadMedia } from './weixin/media.js';
-import { AccessControl } from './config/access.js';
-import { chunkText, safeName, sleep, assertSendable, generateFileKey } from './util/helpers.js';
-import type { AccountConfig, CDNMedia } from './weixin/types.js';
+import { WeixinClient } from './src/weixin/api.js';
+import { MessageType, type MessageItem, type WeixinMessage } from './src/weixin/types.js';
+import { downloadMedia } from './src/weixin/media.js';
+import { AccessControl } from './src/config/access.js';
+import { chunkText, safeName, sleep, assertSendable, generateFileKey } from './src/util/helpers.js';
+import type { AccountConfig, CDNMedia } from './src/weixin/types.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
 
 const STATE_DIR = join(homedir(), '.claude', 'channels', 'weixin');
 const INBOX_DIR = join(STATE_DIR, 'inbox');
 const ACCOUNT_FILE = join(STATE_DIR, 'account.json');
+const CURSOR_FILE = join(STATE_DIR, '.cursor');
 const LOGIN_TRIGGER_FILE = join(STATE_DIR, '.login-trigger');
+const LOG_FILE = join(STATE_DIR, 'debug.log');
+const AUTO_APPROVE_FILE = join(STATE_DIR, '.auto-approve');
 const MAX_CHUNK_LIMIT = 2048; // WeChat text limit ~2048 chars
+const MEDIA_HANDLE_TTL_MS = 30 * 60 * 1000;
+const CONTEXT_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+import { appendFileSync } from 'node:fs';
+function debugLog(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  process.stderr.write(line);
+  try { appendFileSync(LOG_FILE, line); } catch {}
+}
+
+function resetSessionAutoApprove(): void {
+  try {
+    unlinkSync(AUTO_APPROVE_FILE);
+  } catch {
+    // Ignore missing file or startup cleanup errors
+  }
+}
+
+resetSessionAutoApprove();
+
+// ─── Cursor Persistence ─────────────────────────────────────────────
+
+function loadCursor(): string {
+  try {
+    return readFileSync(CURSOR_FILE, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function saveCursor(cursor: string): void {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(CURSOR_FILE, cursor, { mode: 0o600 });
+  } catch {
+    // Ignore errors
+  }
+}
+
+type TimedMediaHandle = {
+  media: CDNMedia;
+  expiresAt: number;
+};
+
+type ContextTokenEntry = {
+  token: string;
+  expiresAt: number;
+};
 
 // Opaque handle registry for safe media downloads (prevents SSRF)
-const mediaHandles = new Map<string, CDNMedia>();
+const mediaHandles = new Map<string, TimedMediaHandle>();
+
+function pruneExpiredMediaHandles(now = Date.now()): void {
+  for (const [handle, entry] of mediaHandles) {
+    if (entry.expiresAt <= now) {
+      mediaHandles.delete(handle);
+    }
+  }
+}
+
+function storeMediaHandle(handle: string, media: CDNMedia): void {
+  pruneExpiredMediaHandles();
+  mediaHandles.set(handle, { media, expiresAt: Date.now() + MEDIA_HANDLE_TTL_MS });
+}
+
+function takeMediaHandle(handle: string): CDNMedia | null {
+  pruneExpiredMediaHandles();
+  const entry = mediaHandles.get(handle);
+  if (!entry) {
+    return null;
+  }
+  mediaHandles.delete(handle);
+  return entry.media;
+}
+
+const mediaHandleEvictionTimer = setInterval(() => {
+  pruneExpiredMediaHandles();
+}, MEDIA_HANDLE_TTL_MS);
+mediaHandleEvictionTimer.unref();
 
 // ─── Error Safety ───────────────────────────────────────────────────
 
@@ -41,6 +120,7 @@ process.on('unhandledRejection', err => {
 });
 process.on('uncaughtException', err => {
   process.stderr.write(`weixin channel: uncaught exception: ${err}\n`);
+  process.exit(1);
 });
 
 // ─── Account Persistence ────────────────────────────────────────────
@@ -94,6 +174,34 @@ const pendingPermissions = new Map<
   { tool_name: string; description: string; input_preview: string }
 >();
 
+function getOnlyPendingPermissionRequestId(): string | null {
+  if (pendingPermissions.size !== 1) {
+    return null;
+  }
+  const next = pendingPermissions.keys().next();
+  return next.done ? null : next.value;
+}
+
+function formatPendingPermissionReplies(): string {
+  return [...pendingPermissions.entries()]
+    .map(([requestId, permission]) => {
+      const shortName = permission.tool_name.replace(/^mcp__plugin_weixin_weixin__/, '');
+      return `${shortName}: ${requestId}`;
+    })
+    .join('\n');
+}
+
+async function sendPermissionDecision(
+  requestId: string,
+  behavior: 'allow' | 'deny',
+): Promise<void> {
+  await mcp.notification({
+    method: 'notifications/claude/channel/permission',
+    params: { request_id: requestId, behavior },
+  });
+  pendingPermissions.delete(requestId);
+}
+
 mcp.setNotificationHandler(
   z.object({
     method: z.literal('notifications/claude/channel/permission_request'),
@@ -106,17 +214,36 @@ mcp.setNotificationHandler(
   }),
   async ({ params }) => {
     const { request_id, tool_name, description, input_preview } = params;
+
+    // Auto-approve mode: immediately allow without asking
+    if (existsSync(AUTO_APPROVE_FILE)) {
+      debugLog(`auto-approve: ${tool_name} (${request_id})`);
+      mcp.notification({
+        method: 'notifications/claude/channel/permission',
+        params: { request_id, behavior: 'allow' },
+      }).catch(err => {
+        process.stderr.write(`weixin channel: auto-approve notify failed: ${err}\n`);
+      });
+      return;
+    }
+
     pendingPermissions.set(request_id, { tool_name, description, input_preview });
 
     // Send permission request to all allowed users as text messages
     access.reload();
     for (const userId of access.allowedUsers) {
+      // Show the short tool name and what it's actually doing (input_preview)
+      const shortName = tool_name.replace(/^mcp__plugin_weixin_weixin__/, '');
+      const replyHint =
+        pendingPermissions.size > 1
+          ? `回复 yes ${request_id} / no ${request_id}，或 yesall 全部允许`
+          : `回复 yes / no，或 yesall 全部允许`;
       const text =
-        `Permission: ${tool_name}\n` +
-        `${description}\n\n` +
-        `Reply: yes ${request_id} or no ${request_id}`;
+        `🔐 ${shortName}: ${input_preview}\n` +
+        `请求 ID: ${request_id}\n\n` +
+        replyHint;
       await client
-        .sendMessage(userId, contextTokens.get(userId) ?? '', {
+        .sendMessage(userId, getContextToken(userId) ?? '', {
           type: MessageType.TEXT,
           text_item: { text },
         })
@@ -208,7 +335,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         // Send text, chunked if needed
         const chunks = chunkText(text, MAX_CHUNK_LIMIT);
         for (const chunk of chunks) {
-          await client.sendMessage(chat_id, contextTokens.get(chat_id) ?? '', {
+          await client.sendMessage(chat_id, getContextToken(chat_id) ?? '', {
             type: MessageType.TEXT,
             text_item: { text: chunk },
           });
@@ -227,7 +354,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           const isVideo = ['mp4', 'avi', 'mov', 'mkv'].includes(ext);
           const mediaType = isImage ? 1 : isVideo ? 2 : 3; // IMAGE=1, VIDEO=2, FILE=3
 
-          const { uploadMedia } = await import('./weixin/media.js');
+          const { uploadMedia } = await import('./src/weixin/media.js');
           const cdnMedia = await uploadMedia(f, chat_id, mediaType, client);
           let item: MessageItem;
           if (isImage) {
@@ -237,7 +364,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           } else {
             item = { type: MessageType.FILE, file_item: { media: cdnMedia, file_name: f.split('/').pop() } };
           }
-          await client.sendMessage(chat_id, contextTokens.get(chat_id) ?? '', item);
+          await client.sendMessage(chat_id, getContextToken(chat_id) ?? '', item);
         }
 
         return { content: [{ type: 'text', text: `sent${chunks.length > 1 ? ` (${chunks.length} chunks)` : ''}` }] };
@@ -252,11 +379,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 
       case 'download_attachment': {
         const handle = args.file_id as string;
-        const cdnMedia = mediaHandles.get(handle);
+        const cdnMedia = takeMediaHandle(handle);
         if (!cdnMedia) {
           throw new Error('invalid or expired attachment handle');
         }
-        mediaHandles.delete(handle);
         const filePath = await downloadMedia(cdnMedia, INBOX_DIR);
         return { content: [{ type: 'text', text: filePath }] };
       }
@@ -266,7 +392,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const text = args.text as string;
         assertAllowedChat(chat_id);
         // WeChat doesn't support editing — send a new message
-        await client.sendMessage(chat_id, contextTokens.get(chat_id) ?? '', {
+        await client.sendMessage(chat_id, getContextToken(chat_id) ?? '', {
           type: MessageType.TEXT,
           text_item: { text: `(edited) ${text}` },
         });
@@ -306,7 +432,39 @@ const client = new WeixinClient();
 const access = new AccessControl(STATE_DIR);
 
 // context_token per user — maintains conversation continuity
-const contextTokens = new Map<string, string>();
+const contextTokens = new Map<string, ContextTokenEntry>();
+
+function pruneExpiredContextTokens(now = Date.now()): void {
+  for (const [userId, entry] of contextTokens) {
+    if (entry.expiresAt <= now) {
+      contextTokens.delete(userId);
+    }
+  }
+}
+
+function setContextToken(userId: string, token: string): void {
+  pruneExpiredContextTokens();
+  contextTokens.set(userId, { token, expiresAt: Date.now() + CONTEXT_TOKEN_TTL_MS });
+}
+
+function getContextToken(userId: string): string | undefined {
+  const now = Date.now();
+  const entry = contextTokens.get(userId);
+  if (!entry) {
+    return undefined;
+  }
+  if (entry.expiresAt <= now) {
+    contextTokens.delete(userId);
+    return undefined;
+  }
+  entry.expiresAt = now + CONTEXT_TOKEN_TTL_MS;
+  return entry.token;
+}
+
+const contextTokenEvictionTimer = setInterval(() => {
+  pruneExpiredContextTokens();
+}, CONTEXT_TOKEN_TTL_MS);
+contextTokenEvictionTimer.unref();
 
 // ─── Message Handling ───────────────────────────────────────────────
 
@@ -321,10 +479,12 @@ function extractTextContent(msg: WeixinMessage): string | null {
 
 async function handleInbound(msg: WeixinMessage): Promise<void> {
   const userId = msg.from_user_id;
+  debugLog(`handleInbound: from=${userId} type=${msg.message_type}`);
 
   // Gate check (reload from disk for cross-process consistency)
   access.reload();
   const gateResult = access.gate(userId);
+  debugLog(`handleInbound: gate=${JSON.stringify(gateResult)}`);
   if (gateResult.action === 'drop') return;
 
   if (gateResult.action === 'pair') {
@@ -343,7 +503,7 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
   }
 
   // Track context token
-  contextTokens.set(userId, msg.context_token);
+  setContextToken(userId, msg.context_token);
 
   // Build media metadata first (before any early return)
   let imagePath: string | undefined;
@@ -361,17 +521,17 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
       }
     } else if (item.type === MessageType.FILE && item.file_item?.media) {
       const handle = generateFileKey();
-      mediaHandles.set(handle, item.file_item.media);
+      storeMediaHandle(handle, item.file_item.media);
       attachmentFileId = handle;
       attachmentName = safeName(item.file_item.file_name) ?? undefined;
     } else if (item.type === MessageType.VOICE && item.voice_item?.media) {
       const handle = generateFileKey();
-      mediaHandles.set(handle, item.voice_item.media);
+      storeMediaHandle(handle, item.voice_item.media);
       attachmentFileId = handle;
       attachmentName = safeName(item.voice_item.text) ?? undefined;
     } else if (item.type === MessageType.VIDEO && item.video_item?.media) {
       const handle = generateFileKey();
-      mediaHandles.set(handle, item.video_item.media);
+      storeMediaHandle(handle, item.video_item.media);
       attachmentFileId = handle;
     }
   }
@@ -379,11 +539,58 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
   const text = extractTextContent(msg);
   if (!text && !imagePath && !attachmentFileId) return;
 
-  // Permission-reply intercept: "yes <hex>" or "no <hex>"
+  // Permission-reply intercept: "yes", "no", "yesall", "stopall"
   if (text) {
-    const permMatch = /^\s*(y|yes|n|no)\s+([0-9a-f]{6})\s*$/i.exec(text);
-    if (permMatch) {
-      const requestId = permMatch[2]!.toLowerCase();
+    const trimmed = text.trim().toLowerCase();
+
+    // yesall: enable auto-approve mode
+    if (trimmed === 'yesall') {
+      writeFileSync(AUTO_APPROVE_FILE, '1', { mode: 0o600 });
+      for (const requestId of [...pendingPermissions.keys()]) {
+        try {
+          await sendPermissionDecision(requestId, 'allow');
+        } catch (err) {
+          process.stderr.write(`weixin channel: auto-approve notify failed: ${err}\n`);
+        }
+      }
+      await client
+        .sendMessage(userId, msg.context_token, {
+          type: MessageType.TEXT,
+          text_item: { text: '已开启自动批准 ✓\n回复 stopall 关闭' },
+        })
+        .catch(() => {});
+      return;
+    }
+
+    // stopall: disable auto-approve mode
+    if (trimmed === 'stopall') {
+      try { unlinkSync(AUTO_APPROVE_FILE); } catch {}
+      await client
+        .sendMessage(userId, msg.context_token, {
+          type: MessageType.TEXT,
+          text_item: { text: '已关闭自动批准 ✗\n每次操作需手动审批' },
+        })
+        .catch(() => {});
+      return;
+    }
+
+    // yes/no: approve or deny a pending request
+    const permMatch = /^\s*(y|yes|n|no)(?:\s+(\S+))?\s*$/i.exec(text);
+    if (permMatch && (pendingPermissions.size > 0 || permMatch[2])) {
+      const requestId = permMatch[2] ?? getOnlyPendingPermissionRequestId();
+      if (!requestId) {
+        await client
+          .sendMessage(userId, msg.context_token, {
+            type: MessageType.TEXT,
+            text_item: {
+              text:
+                '有多个待审批请求，请回复 yes <request_id> 或 no <request_id>：\n' +
+                formatPendingPermissionReplies(),
+            },
+          })
+          .catch(() => {});
+        return;
+      }
       if (!pendingPermissions.has(requestId)) {
         await client
           .sendMessage(userId, msg.context_token, {
@@ -394,14 +601,19 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
         return;
       }
       const behavior = permMatch[1]!.toLowerCase().startsWith('y') ? 'allow' : 'deny';
-      mcp.notification({
-        method: 'notifications/claude/channel/permission',
-        params: { request_id: requestId, behavior },
-      }).catch(err => {
+      try {
+        await sendPermissionDecision(requestId, behavior);
+      } catch (err) {
         process.stderr.write(`weixin channel: permission notify failed: ${err}\n`);
-      });
-      pendingPermissions.delete(requestId);
-      const ack = behavior === 'allow' ? 'Allowed' : 'Denied';
+        await client
+          .sendMessage(userId, msg.context_token, {
+            type: MessageType.TEXT,
+            text_item: { text: 'Permission response failed to send. Try again.' },
+          })
+          .catch(() => {});
+        return;
+      }
+      const ack = behavior === 'allow' ? '已允许 ✓' : '已拒绝 ✗';
       await client
         .sendMessage(userId, msg.context_token, {
           type: MessageType.TEXT,
@@ -425,8 +637,8 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
   }
 
   // Deliver to Claude Code
-  mcp.notification({
-    method: 'notifications/claude/channel',
+  const notifPayload = {
+    method: 'notifications/claude/channel' as const,
     params: {
       content: text,
       meta: {
@@ -439,8 +651,12 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
         ...(attachmentName ? { attachment_name: attachmentName } : {}),
       },
     },
+  };
+  debugLog(`delivering to Claude: ${JSON.stringify(notifPayload)}`);
+  mcp.notification(notifPayload).then(() => {
+    debugLog(`notification sent OK`);
   }).catch(err => {
-    process.stderr.write(`weixin channel: failed to deliver inbound: ${err}\n`);
+    debugLog(`failed to deliver inbound: ${err}`);
   });
 }
 
@@ -570,8 +786,11 @@ let consecutiveErrors = 0;
 let sessionExpired = false;
 
 async function pollLoop(): Promise<void> {
-  let cursor = '';
+  // Load cursor from file (persistent across restarts)
+  let cursor = loadCursor();
   let checkCount = 0;
+
+  process.stderr.write(`weixin channel: starting poll with cursor: ${cursor ? 'loaded' : 'empty'}\n`);
 
   while (polling) {
     // Check for login trigger every 5 iterations (~5 seconds)
@@ -584,6 +803,7 @@ async function pollLoop(): Promise<void> {
     try {
       const resp = await client.getUpdates(cursor);
 
+      // Check for errors
       if (resp.ret != null && resp.ret !== 0) {
         if (resp.errcode === -14) {
           process.stderr.write(
@@ -599,17 +819,20 @@ async function pollLoop(): Promise<void> {
 
       consecutiveErrors = 0;
 
+      // Update and save cursor for next request
       if (resp.get_updates_buf) {
         cursor = resp.get_updates_buf;
+        saveCursor(cursor);
       }
 
-      if (resp.longpolling_timeout_ms) {
-        // Server told us the next poll timeout
-      }
+      // Process messages
+      const msgs = resp.msgs ?? [];
+      debugLog(`poll: got ${msgs.length} msg(s), ret=${resp.ret}, errcode=${resp.errcode}`);
 
-      for (const msg of resp.msgs ?? []) {
+      for (const msg of msgs) {
         // Skip bot messages (kind=2)
-        if (msg.message_type === 2) continue;
+        if (msg.message_type === 2) { debugLog(`skip bot msg type=${msg.message_type}`); continue; }
+        debugLog(`processing msg from ${msg.from_user_id}, text=${msg.item_list?.[0]?.text_item?.text}`);
         await handleInbound(msg);
       }
     } catch (err) {
@@ -688,7 +911,9 @@ async function waitForLoginTrigger(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  debugLog('server starting...');
   await mcp.connect(new StdioServerTransport());
+  debugLog('MCP connected');
   process.stderr.write('weixin channel: MCP connected\n');
 
   // Set up login trigger callback
@@ -712,9 +937,19 @@ async function main(): Promise<void> {
   } else {
     // No saved session — wait for login trigger from skill
     await waitForLoginTrigger();
+    // waitForLoginTrigger already consumed the trigger file — go straight to login
+    try {
+      await startBrowserLogin();
+      process.stderr.write('weixin channel: login complete, starting message poll\n');
+      await runWithAutoReLogin();
+    } catch (err) {
+      process.stderr.write(`weixin channel: login failed: ${err}\n`);
+      process.stderr.write('weixin channel: run /weixin:configure login to retry\n');
+    }
+    return;
   }
 
-  // After polling stops, check if we need to login or re-login
+  // After polling stops (session expired or login triggered during poll)
   if (checkLoginTrigger() || sessionExpired) {
     try {
       await startBrowserLogin();

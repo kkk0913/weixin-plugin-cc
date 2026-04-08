@@ -1,11 +1,32 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { WeixinClient } from './api.js';
 import type { CDNMedia } from './types.js';
 import { MediaType, type MediaTypeValue } from './types.js';
 import { encryptAesEcb, decryptAesEcb, generateAesKey, aesEcbPaddedSize } from './crypto.js';
 import { generateFileKey } from '../util/helpers.js';
+
+function hasPrefix(data: Buffer, prefix: number[]): boolean {
+  return prefix.every((byte, index) => data[index] === byte);
+}
+
+function detectFileExtension(data: Buffer): string {
+  if (hasPrefix(data, [0xff, 0xd8, 0xff])) return '.jpg';
+  if (hasPrefix(data, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return '.png';
+  if (data.subarray(0, 6).toString('ascii') === 'GIF87a') return '.gif';
+  if (data.subarray(0, 6).toString('ascii') === 'GIF89a') return '.gif';
+  if (
+    data.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    data.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) return '.webp';
+  if (data.subarray(0, 4).toString('ascii') === '%PDF') return '.pdf';
+  if (hasPrefix(data, [0x50, 0x4b, 0x03, 0x04])) return '.zip';
+  if (data.length > 12 && data.subarray(4, 8).toString('ascii') === 'ftyp') return '.mp4';
+  if (data.subarray(0, 3).toString('ascii') === 'ID3') return '.mp3';
+  if (data.length > 1 && data[0] === 0xff && (data[1] & 0xe0) === 0xe0) return '.mp3';
+  return '.bin';
+}
 
 /** Maps MessageType → MediaType */
 export function messageItemToMediaType(type: number): MediaTypeValue {
@@ -96,7 +117,7 @@ export async function downloadMedia(
   const decrypted = decryptAesEcb(encrypted, aesKey);
 
   // Save to inbox
-  const ext = '.bin';
+  const ext = detectFileExtension(decrypted);
   const fileName = `${generateFileKey()}${ext}`;
   const filePath = join(inboxDir, fileName);
   writeFileSync(filePath, decrypted);

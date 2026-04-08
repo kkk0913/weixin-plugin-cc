@@ -103,7 +103,13 @@ export function assertSendable(filePath: string, stateDir: string): void {
  * Sanitize a filename for safe storage.
  */
 export function safeName(s: string | undefined): string | undefined {
-  return s?.replace(/[<>\\[\]\r\n;]/g, '_');
+  if (s == null) return undefined;
+  const cleaned = s
+    .replace(/\0/g, '')
+    .replace(/[\/\\<>[\]\r\n;]/g, '_')
+    .replace(/\.{2,}/g, '.')
+    .trim();
+  return cleaned || undefined;
 }
 
 // ─── Sleep Utility ──────────────────────────────────────────────────
