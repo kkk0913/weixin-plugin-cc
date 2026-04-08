@@ -522,6 +522,10 @@ function extractTextContent(msg: WeixinMessage): string | null {
     if (item.type === MessageType.TEXT && item.text_item?.text) {
       return item.text_item.text;
     }
+    // Voice-to-text: use WeChat's speech recognition result as text
+    if (item.type === MessageType.VOICE && item.voice_item?.text) {
+      return item.voice_item.text;
+    }
   }
   return null;
 }
