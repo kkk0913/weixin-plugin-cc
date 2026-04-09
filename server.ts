@@ -53,6 +53,58 @@ function resetSessionAutoApprove(): void {
 
 resetSessionAutoApprove();
 
+// ─── Claude Stats ───────────────────────────────────────────────────
+
+interface StatsCache {
+  version: number;
+  lastComputedDate: string;
+  dailyActivity: Array<{
+    date: string;
+    messageCount: number;
+    sessionCount: number;
+    toolCallCount: number;
+  }>;
+  totalSessions: number;
+  totalMessages: number;
+}
+
+function getClaudeStatsText(): string {
+  try {
+    const statsPath = join(homedir(), '.claude', 'stats-cache.json');
+    const raw = readFileSync(statsPath, 'utf-8');
+    const stats: StatsCache = JSON.parse(raw);
+
+    // Get today's stats if available
+    const today = new Date().toISOString().split('T')[0];
+    const todayStats = stats.dailyActivity.find(d => d.date === today);
+
+    // Calculate recent 7-day averages
+    const recentDays = stats.dailyActivity.slice(-7);
+    const avgMessages = recentDays.length > 0
+      ? Math.round(recentDays.reduce((a, b) => a + b.messageCount, 0) / recentDays.length)
+      : 0;
+
+    let text = '📊 Claude Code 使用统计\n\n';
+
+    if (todayStats) {
+      text += `今日 (${today}):\n`;
+      text += `  消息: ${todayStats.messageCount}\n`;
+      text += `  会话: ${todayStats.sessionCount}\n`;
+      text += `  工具调用: ${todayStats.toolCallCount}\n\n`;
+    } else {
+      text += `今日 (${today}): 暂无数据\n\n`;
+    }
+
+    text += `近7天平均: ${avgMessages} 消息/天\n`;
+    text += `总计: ${stats.totalMessages} 消息, ${stats.totalSessions} 会话\n`;
+    text += `数据更新: ${stats.lastComputedDate}`;
+
+    return text;
+  } catch (err) {
+    return '❌ 无法获取统计信息\n请确保 Claude Code 已运行并生成了统计数据';
+  }
+}
+
 // ─── Cursor Persistence ─────────────────────────────────────────────
 
 function loadCursor(): string {
@@ -596,7 +648,18 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
   if (text) {
     const trimmed = text.trim().toLowerCase();
 
-    // yesall: enable auto-approve mode
+
+    // Status command: show Claude Code usage stats
+    if (trimmed === "/status" || trimmed === "/usage") {
+      const statsText = getClaudeStatsText();
+      await client
+        .sendMessage(userId, msg.context_token, {
+          type: MessageType.TEXT,
+          text_item: { text: statsText },
+        })
+        .catch(() => {});
+      return;
+    }    // yesall: enable auto-approve mode
     if (trimmed === 'yesall') {
       writeFileSync(AUTO_APPROVE_FILE, '1', { mode: 0o600 });
       const failedRequests: string[] = [];
