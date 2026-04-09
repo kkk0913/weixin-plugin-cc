@@ -668,8 +668,8 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
     const trimmed = text.trim().toLowerCase();
 
 
-    // Status command: show Claude Code usage stats
-    if (trimmed === "/status" || trimmed === "/usage") {
+    // Stats command: show Claude Code usage stats
+    if (trimmed === "/stats" || trimmed === "/usage") {
       const statsText = getClaudeUsageText();
       await client
         .sendMessage(userId, msg.context_token, {
