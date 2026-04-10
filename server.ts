@@ -16,6 +16,8 @@ import { z } from 'zod';
 import { readFileSync, writeFileSync, mkdirSync, statSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import https from 'node:https';
+import { execFileSync } from 'node:child_process';
 import { WeixinClient } from './src/weixin/api.js';
 import { MessageType, type MessageItem, type WeixinMessage } from './src/weixin/types.js';
 import { downloadMedia } from './src/weixin/media.js';
@@ -54,16 +56,15 @@ function resetSessionAutoApprove(): void {
 resetSessionAutoApprove();
 // ─── Claude Usage ───────────────────────────────────────────────────
 
-interface UsageCache {
-  data: {
-    planName?: string;
-    fiveHour: number | null;
-    sevenDay: number | null;
-    fiveHourResetAt?: string;
-    sevenDayResetAt?: string;
-    apiUnavailable?: boolean;
-    apiError?: string;
-  };
+const USAGE_CACHE_FILE = join(homedir(), '.claude', 'channels', 'weixin', '.usage-cache.json');
+const USAGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min, matches Anthropic rate-limit window
+
+interface LocalUsageCache {
+  planName: string;
+  fiveHour: number | null;
+  sevenDay: number | null;
+  fiveHourResetAt: string | null;
+  sevenDayResetAt: string | null;
   timestamp: number;
 }
 
@@ -81,58 +82,130 @@ interface StatsCache {
   lastComputedDate: string;
 }
 
-function formatTimeRemaining(resetAt: string | undefined): string {
+function formatTimeRemaining(resetAt: string | null | undefined): string {
   if (!resetAt) return '未知';
   const reset = new Date(resetAt);
   const now = new Date();
   const diffMs = reset.getTime() - now.getTime();
   if (diffMs <= 0) return '即将重置';
-
   const hours = Math.floor(diffMs / (1000 * 60 * 60));
   const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
   return `${hours}小时${minutes}分钟`;
 }
 
-function getClaudeUsageText(): string {
-  const possiblePaths = [
-    join(homedir(), '.claude', 'plugins', 'cache', 'claude-hud', '.usage-cache.json'),
-    join(homedir(), '.claude', '.usage-cache.json'),
-  ];
+function readKeychainToken(): { accessToken: string; subscriptionType: string } | null {
+  try {
+    const raw = execFileSync('security', [
+      'find-generic-password', '-s', 'Claude Code-credentials', '-w',
+    ], { timeout: 3000 }).toString().trim();
+    const data = JSON.parse(raw);
+    const oauth = data?.claudeAiOauth;
+    if (!oauth?.accessToken) return null;
+    const expiresAt = oauth.expiresAt;
+    if (expiresAt != null && expiresAt <= Date.now()) return null;
+    return { accessToken: oauth.accessToken, subscriptionType: oauth.subscriptionType ?? '' };
+  } catch {
+    return null;
+  }
+}
 
-  let cache: UsageCache | null = null;
-  for (const cachePath of possiblePaths) {
-    try {
-      const raw = readFileSync(cachePath, 'utf-8');
-      cache = JSON.parse(raw) as UsageCache;
-      break;
-    } catch {
-      continue;
+function fetchOAuthUsage(accessToken: string): Promise<{
+  five_hour?: { utilization?: number; resets_at?: string };
+  seven_day?: { utilization?: number; resets_at?: string };
+} | null> {
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/api/oauth/usage',
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'User-Agent': 'claude-code/2.1',
+      },
+      timeout: 10000,
+    }, (res) => {
+      let body = '';
+      res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      res.on('end', () => {
+        if (res.statusCode !== 200) { resolve(null); return; }
+        try { resolve(JSON.parse(body)); } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+}
+
+function clampPercent(v: number | undefined | null): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  return Math.round(Math.max(0, Math.min(100, v)));
+}
+
+function getPlanName(subscriptionType: string): string {
+  const t = subscriptionType.toLowerCase();
+  if (t.includes('pro')) return 'Pro';
+  if (t.includes('max')) return 'Max';
+  if (t.includes('team')) return 'Team';
+  if (t.includes('enterprise')) return 'Enterprise';
+  return subscriptionType || 'Pro';
+}
+
+async function getClaudeUsageText(): Promise<string> {
+  // Try cache first (fresh within TTL)
+  let staleCache: LocalUsageCache | null = null;
+  try {
+    const cached: LocalUsageCache = JSON.parse(readFileSync(USAGE_CACHE_FILE, 'utf-8'));
+    if (Date.now() - cached.timestamp < USAGE_CACHE_TTL_MS) {
+      return formatUsageText(cached);
     }
+    staleCache = cached; // Keep as fallback if API fails
+  } catch {
+    // Cache miss — fetch fresh
   }
 
-  if (!cache) {
-    return '❌ 用量信息: 无法获取，请安装 claude-hud 插件';
+  // Read keychain token
+  const creds = readKeychainToken();
+  if (!creds) {
+    return staleCache
+      ? `${formatUsageText(staleCache)}⚠️ 数据来自缓存 (凭据读取失败)\n`
+      : '❌ 用量信息: 无法读取凭据';
   }
 
-  const { data } = cache;
-  if (data.apiUnavailable) {
-    return '❌ 用量信息: API 暂时不可用';
+  // Fetch from API
+  const apiData = await fetchOAuthUsage(creds.accessToken);
+  if (!apiData) {
+    return staleCache
+      ? `${formatUsageText(staleCache)}⚠️ 数据来自旧缓存 (API 暂时不可用)\n`
+      : '❌ 用量信息: API 暂时不可用';
   }
 
-  const plan = data.planName || 'Unknown';
-  const fiveHourAvail = data.fiveHour !== null ? 100 - data.fiveHour : null;
-  const sevenDayAvail = data.sevenDay !== null ? 100 - data.sevenDay : null;
+  const result: LocalUsageCache = {
+    planName: getPlanName(creds.subscriptionType),
+    fiveHour: clampPercent(apiData.five_hour?.utilization),
+    sevenDay: clampPercent(apiData.seven_day?.utilization),
+    fiveHourResetAt: apiData.five_hour?.resets_at ?? null,
+    sevenDayResetAt: apiData.seven_day?.resets_at ?? null,
+    timestamp: Date.now(),
+  };
 
-  let text = `📊 用量配额 (${plan})\n`;
+  // Write cache
+  try {
+    writeFileSync(USAGE_CACHE_FILE, JSON.stringify(result), { mode: 0o600 });
+  } catch { /* ignore cache write failures */ }
 
-  if (fiveHourAvail !== null) {
-    text += `5小时可用: ${fiveHourAvail}% (已用 ${data.fiveHour}%) | 重置: ${formatTimeRemaining(data.fiveHourResetAt)}\n`;
+  return formatUsageText(result);
+}
+
+function formatUsageText(c: LocalUsageCache): string {
+  let text = `📊 用量配额 (${c.planName})\n`;
+  if (c.fiveHour !== null) {
+    text += `5h 已用: ${c.fiveHour}% | 剩余: ${100 - c.fiveHour}% | 重置: ${formatTimeRemaining(c.fiveHourResetAt)}\n`;
   }
-
-  if (sevenDayAvail !== null) {
-    text += `7天可用: ${sevenDayAvail}% (已用 ${data.sevenDay}%) | 重置: ${formatTimeRemaining(data.sevenDayResetAt)}\n`;
+  if (c.sevenDay !== null) {
+    text += `7d 已用: ${c.sevenDay}% | 剩余: ${100 - c.sevenDay}% | 重置: ${formatTimeRemaining(c.sevenDayResetAt)}\n`;
   }
-
   return text;
 }
 
@@ -167,8 +240,8 @@ function getClaudeActivityText(): string {
   }
 }
 
-function getClaudeStatsCombined(): string {
-  const usagePart = getClaudeUsageText();
+async function getClaudeStatsCombined(): Promise<string> {
+  const usagePart = await getClaudeUsageText();
   const activityPart = getClaudeActivityText();
   return usagePart + activityPart;
 }
@@ -719,7 +792,7 @@ async function handleInbound(msg: WeixinMessage): Promise<void> {
 
     // Stats command: show Claude Code usage stats
     if (trimmed === "/stats") {
-      const statsText = getClaudeStatsCombined();
+      const statsText = await getClaudeStatsCombined();
       await client
         .sendMessage(userId, msg.context_token, {
           type: MessageType.TEXT,
