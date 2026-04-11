@@ -1,14 +1,19 @@
 {
-  "name": "claude-channel-weixin",
+  "name": "weixin-plugin-cc-cx",
   "version": "1.0.0",
-  "description": "WeChat channel for Claude Code — bridge WeChat messages to Claude Code via MCP",
+  "description": "WeChat bridge for Claude Code and Codex",
   "license": "MIT",
   "type": "module",
   "bin": "./server.ts",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "start": "bun install --no-summary && bun server.ts",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "start": "bun install --no-summary && WEIXIN_SERVER_ROLE=daemon bun server.ts",
+    "login": "bun weixin-cli.ts login",
+    "relogin": "bun weixin-cli.ts relogin",
+    "clear": "bun weixin-cli.ts clear",
+    "status": "bun weixin-cli.ts status",
     "dev": "tsc --watch"
   },
   "dependencies": {

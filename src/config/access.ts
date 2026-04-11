@@ -1,6 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { AccessRepository } from '../state/access-repository.js';
 
 export type AccessMode = 'pairing' | 'allowlist' | 'disabled';
 
@@ -15,18 +14,12 @@ export type GateResult =
   | { action: 'drop' }
   | { action: 'pair'; code: string };
 
-const DEFAULT_CONFIG: AccessConfig = {
-  mode: 'pairing',
-  allowedUsers: [],
-  pendingUsers: {},
-};
-
 export class AccessControl {
   private config: AccessConfig;
-  private configPath: string;
+  private readonly repository: AccessRepository;
 
   constructor(stateDir: string) {
-    this.configPath = join(stateDir, 'access.json');
+    this.repository = new AccessRepository(stateDir);
     this.config = this.load();
   }
 
@@ -102,24 +95,10 @@ export class AccessControl {
   }
 
   private load(): AccessConfig {
-    try {
-      if (existsSync(this.configPath)) {
-        const raw = readFileSync(this.configPath, 'utf-8');
-        return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
-      }
-    } catch {
-      // corrupted config — use defaults
-    }
-    const defaults = { ...DEFAULT_CONFIG };
-    this.config = defaults;
-    this.save();
-    return defaults;
+    return this.repository.load();
   }
 
   private save(): void {
-    mkdirSync(dirname(this.configPath), { recursive: true });
-    const tmp = this.configPath + '.tmp';
-    writeFileSync(tmp, JSON.stringify(this.config, null, 2) + '\n', { mode: 0o600 });
-    renameSync(tmp, this.configPath);
+    this.repository.save(this.config);
   }
 }

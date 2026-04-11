@@ -13,7 +13,8 @@ allowed-tools:
 # /weixin:configure - WeChat Channel Setup
 
 WeChat uses QR code login (no bot token). The session is stored in
-`~/.claude/channels/weixin/account.json`. The server reads it at boot and
+`${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json` by default
+(or `WEIXIN_STATE_DIR`). The server reads it at boot and
 displays a QR code in stderr if no saved session exists.
 
 Arguments passed: `$ARGUMENTS`
@@ -26,17 +27,19 @@ Arguments passed: `$ARGUMENTS`
 
 Read both state files and give the user a complete picture:
 
-1. **Session** - check `~/.claude/channels/weixin/account.json` exists. If it
+1. **Session** - check the account state file exists. Default path:
+   `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json`. If it
    does, show: *"Session saved (logged in)."* If not: *"Not logged in yet."*
 
-2. **Access** - read `~/.claude/channels/weixin/access.json` (missing file =
+2. **Access** - read the access state file (default:
+   `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/access.json`) (missing file =
    defaults: `mode: "pairing"`, empty allowlist). Show:
    - Mode and what it means in one line
    - Allowed users: count and list
    - Pending pairings: count with codes and user IDs if any
 
 3. **What next** - end with a concrete next step based on state:
-   - No session → *"Run `/weixin:configure login` to start QR login."*
+   - No session → *"Preferred: run `npm run login` to start QR login. Skill alternative: `/weixin:configure login`."*
    - Session exists, policy is pairing, nobody allowed → *"Message your WeChat
      account from another user. It replies with a code; approve with
      `/weixin:access pair <code>`."*
@@ -72,33 +75,37 @@ offer.
 
 ### `login` - trigger browser login
 
-**This command triggers the login flow immediately** - no restart needed.
+**Preferred path:** tell the user to use `npm run login`.
 
-1. Check if `~/.claude/channels/weixin/account.json` exists:
+This skill command remains available and triggers the same login flow immediately.
+
+1. Check if the account state file exists.
    - If yes and `$ARGUMENTS` contains `--force`: proceed to step 2
-   - If yes without `--force`: tell the user *"Already logged in. Use `/weixin:configure login --force` to re-login."* and stop.
+   - If yes without `--force`: tell the user *"Already logged in. Preferred re-login path: `npm run relogin`. Skill alternative: `/weixin:configure login --force`."* and stop.
    - If no: proceed to step 2
 
 2. Create trigger file to signal the server to start login:
    ```bash
-   mkdir -p ~/.claude/channels/weixin
-   echo "login" > ~/.claude/channels/weixin/.login-trigger
+   mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/weixin-plugin-cc-cx"
+   echo "login" > "${XDG_STATE_HOME:-$HOME/.local/state}/weixin-plugin-cc-cx/.login-trigger"
    ```
 
-3. Tell the user: *"Login triggered. The browser link will appear in the output above. Open it in your browser, scan with WeChat, and confirm on your phone within 8 minutes."*
+3. Tell the user: *"Login triggered. Preferred future path is `npm run login`. The browser link will appear in the output above. Open it in your browser, scan with WeChat, and confirm on your phone within 8 minutes."*
 
 ### `relogin` - force re-login
 
-Same as `login --force`. Clears existing session and starts fresh login.
+Preferred path: `npm run relogin`.
 
-1. Delete `~/.claude/channels/weixin/account.json` if exists.
-2. Create trigger file: `echo "login" > ~/.claude/channels/weixin/.login-trigger`
-3. Tell the user: *"Session cleared and login triggered. Watch for the browser link above."*
+Skill behavior is the same as `login --force`. Clears existing session and starts fresh login.
+
+1. Delete the account state file if it exists.
+2. Create trigger file under the state dir.
+3. Tell the user: *"Session cleared and login triggered. Preferred future path is `npm run relogin`. Watch for the browser link above."*
 
 ### `clear` - remove saved session
 
-1. Delete `~/.claude/channels/weixin/account.json` if it exists.
-2. Tell the user: *"Session cleared. Run `/weixin:configure login` to start a fresh login."*
+1. Delete the account state file if it exists.
+2. Tell the user: *"Session cleared. Preferred fresh-login path: `npm run login`. Skill alternative: `/weixin:configure login`."*
 
 ### `--help` - show usage
 
@@ -117,5 +124,5 @@ Show all available commands and their descriptions.
 - WeChat uses QR login, not tokens. There's nothing to paste - the QR shows
   in the server's stderr on startup when no saved session exists.
 - If the session expires during operation, the server stops polling and logs
-  the error code. The user needs to run `/weixin:configure clear` then
-  `/weixin:configure login` to re-authenticate.
+  the error code. Preferred recovery path: `npm run clear` then
+  `npm run login`. The skill commands remain available as alternatives.
