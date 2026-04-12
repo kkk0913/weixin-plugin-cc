@@ -38,23 +38,26 @@ cd weixin-plugin-cc-cx
 npm run start
 ```
 
+可选环境变量既可以通过 shell 传入，也可以写在项目根目录的 `.env` 文件里。示例见 [.env.example](/home/demon/workspace/weixin-plugin-cc-cx/.env.example)。
+
 可选环境变量：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `WEIXIN_STATE_DIR` | `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx` | 会话、路由、socket、缓存、inbox 的状态目录 |
+| `WEIXIN_CLAUDE_CONFIG_DIR` | `~/.claude` | Claude 本地配置目录，用于读取 `.credentials.json` 和 `stats-cache.json` |
 | `WEIXIN_CODEX_CWD` | 当前工作目录 | 传给 `codex -C ... app-server` 的工作区 |
 | `WEIXIN_CODEX_MODEL` | 未设置 | 覆盖 Codex 模型 |
 | `WEIXIN_CODEX_APPROVAL_POLICY` | `on-request` | Codex 审批策略 |
 | `WEIXIN_CODEX_SANDBOX` | `workspace-write` | Codex 沙箱模式 |
 | `WEIXIN_CODEX_COMMAND` | `codex` | Codex CLI 可执行文件 |
 
-目前没有专门的 `WEIXIN_CLAUDE_*` 环境变量。Claude Code 侧是通过 daemon 管理的本地 proxy/socket 连接。
+`WEIXIN_CLAUDE_CONFIG_DIR` 只用于读取本地 Claude 文件，例如 `.credentials.json` 和 `stats-cache.json`。Claude Code 本身仍然是通过 daemon 管理的本地 proxy/socket 连接。
 
 示例：
 
 ```bash
-WEIXIN_STATE_DIR=/path/to/state WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 npm run start
+WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 npm run start
 ```
 
 ### 2. 再连接 Claude Code
@@ -146,7 +149,7 @@ npm run login
 | `/cc` | 等同于 `/claude` |
 | `/codex` | 后续消息转发给 Codex |
 
-也支持简写和自然语言切换，例如 `code s`、`code x`、`Claude`、`Codex`、`Cloud Code`、`switch to codex`、`切换到code x`。
+为避免和普通对话混淆，后端切换现在只识别带 `/` 的显式命令。
 
 ## Skills
 
@@ -196,7 +199,11 @@ src/
 │   └── proxy.ts           # Claude MCP stdio 代理 -> 本地 daemon socket
 ├── codex/
 │   ├── app-server.ts      # Codex app-server JSON-RPC 客户端
+│   ├── approval-manager.ts # Codex 审批状态管理
 │   ├── bridge.ts          # WeChat <-> Codex 线程桥接
+│   ├── server-request-handler.ts # Codex 服务器请求处理
+│   ├── thread-manager.ts  # Codex 对话线程生命周期
+│   ├── turn-state.ts      # Codex 回合跟踪
 │   └── types.ts           # 精简的 Codex 协议类型
 ├── config/
 │   ├── access.ts          # 访问控制（配对/白名单/禁用）
@@ -210,17 +217,28 @@ src/
 │   ├── daemon.ts          # 顶层装配与启动流程
 │   ├── backend-manager.ts # 后端可用性与 Codex bridge 生命周期
 │   ├── backends.ts        # Claude/Codex 后端适配器
-│   ├── inbound-router.ts  # 已解析入站事件的分发器
+│   ├── bridge-server.ts   # 插件模式下的桥接 HTTP 服务器
+│   ├── claude-activity-provider.ts # Claude 输入状态提供者
+│   ├── claude-config.ts   # Claude 配置辅助
+│   ├── claude-usage-provider.ts # Claude 用量统计提供者
+│   ├── codex-rate-limit-provider.ts # Codex 速率限制跟踪
 │   ├── command-parser.ts  # 后端切换和 stats 命令解析
+│   ├── command-service.ts # 命令执行编排
+│   ├── command-text.ts    # 命令响应文本格式化
+│   ├── env.ts             # 环境变量辅助
 │   ├── inbound-parser.ts  # 入站消息分类
-│   ├── polling-service.ts # 带 cursor 的轮询包装
-│   ├── polling.ts         # 长轮询主循环
+│   ├── inbound-router.ts  # 已解析入站事件的分发器
 │   ├── lifecycle.ts       # 退出和信号处理
 │   ├── login.ts           # 扫码登录与重登录流程
+│   ├── paths.ts           # 共享运行时路径
+│   ├── polling-service.ts # 带 cursor 的轮询包装
+│   ├── polling.ts         # 长轮询主循环
 │   ├── session-state.ts   # 进程内 TTL 状态
+│   ├── state-dir.ts       # 状态目录解析
+│   ├── stats-format.ts    # 统计格式化辅助
 │   ├── stats-service.ts   # Claude/Codex 统计聚合
-│   ├── tool-handlers.ts   # MCP 工具执行与权限转发
-│   └── paths.ts           # 共享运行时路径
+│   ├── system-message-service.ts # 系统消息组装
+│   └── tool-handlers.ts   # MCP 工具执行与权限转发
 ├── state/
 │   ├── json-file.ts       # 通用 JSON 文件持久化帮助类
 │   ├── access-repository.ts
@@ -247,17 +265,21 @@ test/
 │   ├── access.test.ts
 │   ├── backend-route.test.ts
 │   └── poll-owner.test.ts
-└── runtime/
-    ├── command-parser.test.ts
-    ├── inbound-parser.test.ts
-    ├── inbound-router.test.ts
-    └── session-state.test.ts
+├── runtime/
+│   ├── command-parser.test.ts
+│   ├── inbound-parser.test.ts
+│   ├── inbound-router.test.ts
+│   └── session-state.test.ts
+└── weixin/
+    └── inbound.test.ts
 
 skills/
 ├── access/
 │   └── SKILL.md           # 访问控制 skill
-└── configure/
-    └── SKILL.md           # 配置和登录 skill
+├── configure/
+│   └── SKILL.md           # 配置和登录 skill
+└── permission/
+    └── SKILL.md           # 权限管理模式 skill
 ```
 
 ## 状态目录

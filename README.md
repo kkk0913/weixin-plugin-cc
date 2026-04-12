@@ -38,23 +38,26 @@ Start the daemon from the cloned repo:
 npm run start
 ```
 
+Optional environment variables can be set either in your shell or in a project-root `.env` file. See [.env.example](/home/demon/workspace/weixin-plugin-cc-cx/.env.example).
+
 Optional environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WEIXIN_STATE_DIR` | `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx` | State directory for session, routes, socket, cache, and inbox |
+| `WEIXIN_CLAUDE_CONFIG_DIR` | `~/.claude` | Claude local config directory used for `.credentials.json` and `stats-cache.json` |
 | `WEIXIN_CODEX_CWD` | current working directory | Workspace passed to `codex -C ... app-server` |
 | `WEIXIN_CODEX_MODEL` | unset | Override Codex model |
 | `WEIXIN_CODEX_APPROVAL_POLICY` | `on-request` | Codex approval policy |
 | `WEIXIN_CODEX_SANDBOX` | `workspace-write` | Codex sandbox mode |
 | `WEIXIN_CODEX_COMMAND` | `codex` | Codex CLI executable |
 
-There are currently no dedicated `WEIXIN_CLAUDE_*` environment variables. Claude Code connects through the local proxy/socket path managed by the daemon.
+`WEIXIN_CLAUDE_CONFIG_DIR` is only used to read local Claude files such as `.credentials.json` and `stats-cache.json`. Claude Code itself still connects through the local proxy/socket managed by the daemon.
 
 Example:
 
 ```bash
-WEIXIN_STATE_DIR=/path/to/state WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 npm run start
+WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 npm run start
 ```
 
 ### 2. Connect Claude Code
@@ -146,7 +149,7 @@ Per-chat backend mode is remembered until changed.
 | `/cc` | Same as `/claude` |
 | `/codex` | Route subsequent messages from this WeChat user to Codex |
 
-You can also use short aliases such as `code s`, `code x`, `Claude`, `Codex`, `Cloud Code`, or natural commands like `switch to codex` / `切换到code x`.
+Only slash commands are recognized for backend switching to avoid accidental matches in normal conversation.
 
 ## Skills
 
@@ -196,7 +199,11 @@ src/
 │   └── proxy.ts           # Claude MCP stdio proxy -> local daemon socket
 ├── codex/
 │   ├── app-server.ts      # Codex app-server JSON-RPC client
+│   ├── approval-manager.ts # Codex approval state management
 │   ├── bridge.ts          # WeChat <-> Codex thread bridge
+│   ├── server-request-handler.ts # Codex server request processing
+│   ├── thread-manager.ts  # Codex conversation thread lifecycle
+│   ├── turn-state.ts      # Codex turn tracking
 │   └── types.ts           # Minimal Codex protocol types
 ├── config/
 │   ├── access.ts          # Access control (pairing/allowlist/disabled)
@@ -210,17 +217,28 @@ src/
 │   ├── daemon.ts          # Top-level wiring and startup
 │   ├── backend-manager.ts # Backend readiness and Codex bridge lifecycle
 │   ├── backends.ts        # Claude/Codex backend adapters
-│   ├── inbound-router.ts  # Parsed inbound dispatcher
+│   ├── bridge-server.ts   # Bridge HTTP server for plugin mode
+│   ├── claude-activity-provider.ts # Claude typing indicator provider
+│   ├── claude-config.ts   # Claude configuration helpers
+│   ├── claude-usage-provider.ts # Claude usage stats provider
+│   ├── codex-rate-limit-provider.ts # Codex rate limit tracking
 │   ├── command-parser.ts  # Backend switch/stats command parsing
+│   ├── command-service.ts # Command execution orchestration
+│   ├── command-text.ts    # Command response text formatting
+│   ├── env.ts             # Environment variable helpers
 │   ├── inbound-parser.ts  # Inbound message classification
-│   ├── polling-service.ts # Cursor-backed polling wrapper
-│   ├── polling.ts         # Long-poll loop
+│   ├── inbound-router.ts  # Parsed inbound dispatcher
 │   ├── lifecycle.ts       # Shutdown and signal handling
 │   ├── login.ts           # QR login and re-login flow
+│   ├── paths.ts           # Shared runtime paths
+│   ├── polling-service.ts # Cursor-backed polling wrapper
+│   ├── polling.ts         # Long-poll loop
 │   ├── session-state.ts   # In-memory TTL state
+│   ├── state-dir.ts       # State directory resolution
+│   ├── stats-format.ts    # Stats formatting helpers
 │   ├── stats-service.ts   # Claude/Codex stats aggregation
-│   ├── tool-handlers.ts   # MCP tool execution and permission relay
-│   └── paths.ts           # Shared runtime paths
+│   ├── system-message-service.ts # System message assembly
+│   └── tool-handlers.ts   # MCP tool execution and permission relay
 ├── state/
 │   ├── json-file.ts       # Shared JSON file persistence helper
 │   ├── access-repository.ts
@@ -247,17 +265,21 @@ test/
 │   ├── access.test.ts
 │   ├── backend-route.test.ts
 │   └── poll-owner.test.ts
-└── runtime/
-    ├── command-parser.test.ts
-    ├── inbound-parser.test.ts
-    ├── inbound-router.test.ts
-    └── session-state.test.ts
+├── runtime/
+│   ├── command-parser.test.ts
+│   ├── inbound-parser.test.ts
+│   ├── inbound-router.test.ts
+│   └── session-state.test.ts
+└── weixin/
+    └── inbound.test.ts
 
 skills/
 ├── access/
 │   └── SKILL.md           # Access control skill
-└── configure/
-    └── SKILL.md           # Setup and login skill
+├── configure/
+│   └── SKILL.md           # Setup and login skill
+└── permission/
+    └── SKILL.md           # Permission mode management skill
 ```
 
 ## State Directory
