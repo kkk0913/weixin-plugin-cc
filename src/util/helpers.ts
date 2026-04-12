@@ -1,7 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { BaseInfo } from '../weixin/types.js';
+
+export function expandTilde(p: string): string {
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) {
+    return join(homedir(), p.slice(1));
+  }
+  return p;
+}
 
 // ─── Version Encoding ──────────────────────────────────────────────
 /**

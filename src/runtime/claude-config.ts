@@ -1,12 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-
-function expandTilde(p: string): string {
-  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) {
-    return join(homedir(), p.slice(1));
-  }
-  return p;
-}
+import { expandTilde } from '../util/helpers.js';
 
 export function getClaudeConfigDir(): string {
   const configured = process.env.WEIXIN_CLAUDE_CONFIG_DIR?.trim();

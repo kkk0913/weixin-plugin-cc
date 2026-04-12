@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, unlinkSync } from 'node:fs';
 import { AccessControl } from '../config/access.js';
 import { BackendRouteControl } from '../config/backend-route.js';
 import { PollLeaseControl } from '../config/poll-owner.js';
+import { expandTilde } from '../util/helpers.js';
 import { FlagFile } from '../state/flag-file.js';
 import { MessageType } from '../weixin/types.js';
 import { LoginManager, type PollRuntimeState } from './login.js';
@@ -119,7 +120,7 @@ function sendBridgePermissionDecision(requestId: string, behavior: 'allow' | 'de
 
 const backendManager = new BackendManager({
   stateDir: STATE_DIR,
-  cwd: process.env.WEIXIN_CODEX_CWD?.trim() || process.cwd(),
+  cwd: expandTilde(process.env.WEIXIN_CODEX_CWD?.trim() || process.cwd()),
   codexCommand: process.env.WEIXIN_CODEX_COMMAND?.trim() || undefined,
   model: process.env.WEIXIN_CODEX_MODEL,
   approvalPolicy: (process.env.WEIXIN_CODEX_APPROVAL_POLICY?.trim() as any) || 'on-request',

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expandTilde } from '../util/helpers.js';
 
 function stripWrappingQuotes(value: string): string {
   if (
@@ -30,7 +31,7 @@ export function loadProjectEnv(cwd = process.cwd()): void {
     }
 
     const key = match[1]!;
-    const value = stripWrappingQuotes(match[2]!.trim());
+    const value = expandTilde(stripWrappingQuotes(match[2]!.trim()));
     if (process.env[key] === undefined) {
       process.env[key] = value;
     }
@@ -40,10 +41,10 @@ export function loadProjectEnv(cwd = process.cwd()): void {
 export function getEnvSummary(): string {
   const entries = [
     { key: 'WEIXIN_SERVER_ROLE', value: process.env.WEIXIN_SERVER_ROLE ?? 'auto' },
-    { key: 'WEIXIN_ENV_FILE', value: process.env.WEIXIN_ENV_FILE ?? '(none)' },
-    { key: 'WEIXIN_STATE_DIR', value: process.env.WEIXIN_STATE_DIR ?? '(default)' },
-    { key: 'WEIXIN_CLAUDE_CONFIG_DIR', value: process.env.WEIXIN_CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? '~/.claude' },
-    { key: 'WEIXIN_CODEX_CWD', value: process.env.WEIXIN_CODEX_CWD?.trim() || process.cwd() },
+    { key: 'WEIXIN_ENV_FILE', value: process.env.WEIXIN_ENV_FILE ? expandTilde(process.env.WEIXIN_ENV_FILE.trim()) : '(none)' },
+    { key: 'WEIXIN_STATE_DIR', value: process.env.WEIXIN_STATE_DIR ? expandTilde(process.env.WEIXIN_STATE_DIR.trim()) : '(default)' },
+    { key: 'WEIXIN_CLAUDE_CONFIG_DIR', value: process.env.WEIXIN_CLAUDE_CONFIG_DIR ? expandTilde(process.env.WEIXIN_CLAUDE_CONFIG_DIR.trim()) : (process.env.CLAUDE_CONFIG_DIR ? expandTilde(process.env.CLAUDE_CONFIG_DIR.trim()) : '~/.claude') },
+    { key: 'WEIXIN_CODEX_CWD', value: expandTilde(process.env.WEIXIN_CODEX_CWD?.trim() || process.cwd()) },
     { key: 'WEIXIN_CODEX_MODEL', value: process.env.WEIXIN_CODEX_MODEL?.trim() || '(unset)' },
     { key: 'WEIXIN_CODEX_APPROVAL_POLICY', value: process.env.WEIXIN_CODEX_APPROVAL_POLICY?.trim() || 'on-request' },
     { key: 'WEIXIN_CODEX_SANDBOX', value: process.env.WEIXIN_CODEX_SANDBOX?.trim() || 'workspace-write' },
