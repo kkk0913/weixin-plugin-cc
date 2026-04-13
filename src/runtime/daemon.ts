@@ -134,7 +134,7 @@ const backendManager = new BackendManager({
 const statsService = new StatsService({
   debug: debugLog,
   getCodexBridge: () => backendManager.ensureCodexBridgeStarted(),
-  model: process.env.WEIXIN_CODEX_MODEL,
+  model: process.env.WEIXIN_CODEX_MODEL?.trim() || undefined,
 });
 
 const toolHandlers = new ClaudeToolHandlers({

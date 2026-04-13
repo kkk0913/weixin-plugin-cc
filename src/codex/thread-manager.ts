@@ -77,7 +77,7 @@ export class CodexThreadManager {
       approvalPolicy: this.approvalPolicy,
       approvalsReviewer: 'user',
       sandbox: this.sandbox,
-      model: this.model,
+      ...(this.model ? { model: this.model } : {}),
       developerInstructions: this.developerInstructions,
       persistExtendedHistory: true,
     };
@@ -89,7 +89,7 @@ export class CodexThreadManager {
       approvalPolicy: this.approvalPolicy,
       approvalsReviewer: 'user',
       sandbox: this.sandbox,
-      model: this.model,
+      ...(this.model ? { model: this.model } : {}),
       serviceName: 'weixin-codex',
       developerInstructions: this.developerInstructions,
       ephemeral: false,
