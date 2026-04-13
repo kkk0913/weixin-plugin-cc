@@ -94,6 +94,7 @@ export class CodexBridge {
     this.client = new CodexAppServerClient({
       command: opts.codexCommand,
       cwd: this.cwd,
+      model: this.model,
       debug: this.debug,
     });
     this.threadManager = new CodexThreadManager({

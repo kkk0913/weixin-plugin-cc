@@ -122,7 +122,7 @@ const backendManager = new BackendManager({
   stateDir: STATE_DIR,
   cwd: expandTilde(process.env.WEIXIN_CODEX_CWD?.trim() || process.cwd()),
   codexCommand: process.env.WEIXIN_CODEX_COMMAND?.trim() || undefined,
-  model: process.env.WEIXIN_CODEX_MODEL,
+  model: process.env.WEIXIN_CODEX_MODEL?.trim() || undefined,
   approvalPolicy: (process.env.WEIXIN_CODEX_APPROVAL_POLICY?.trim() as any) || 'on-request',
   sandbox: (process.env.WEIXIN_CODEX_SANDBOX?.trim() as any) || 'workspace-write',
   debug: debugLog,

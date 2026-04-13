@@ -58,7 +58,9 @@ function pickCodexRateLimitSnapshot(data: GetAccountRateLimitsResponse): RateLim
 }
 
 export function formatClaudeUsageText(cache: LocalUsageCache): string {
-  let text = `📊 用量配额 (${cache.planName})\n`;
+  let text = `【Claude Code】\n`;
+  text += `━━━━━━━━━━━━━━━━\n`;
+  text += `📊 用量配额 (${cache.planName})\n`;
   if (cache.fiveHour !== null) {
     text += `5h 已用: ${cache.fiveHour}% | 剩余: ${100 - cache.fiveHour}% | 重置: ${formatTimeRemaining(cache.fiveHourResetAt)}\n`;
   }
@@ -71,7 +73,9 @@ export function formatClaudeUsageText(cache: LocalUsageCache): string {
 export function formatCodexRateLimitsText(data: GetAccountRateLimitsResponse, model?: string): string {
   const snapshot = pickCodexRateLimitSnapshot(data);
   const lines = [
-    `\n🤖 Codex Rate Limit (${model ?? 'default'})`,
+    `\n【Codex】`,
+    `━━━━━━━━━━━━━━━━`,
+    `🤖 Rate Limit (${model ?? 'default'})`,
     `套餐: ${formatPlanType(snapshot.planType)}`,
   ];
   if (snapshot.limitName || snapshot.limitId) {

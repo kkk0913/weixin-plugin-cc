@@ -12,6 +12,7 @@ import type {
 export interface CodexAppServerClientOptions {
   command?: string;
   cwd: string;
+  model?: string;
   debug?: (msg: string) => void;
 }
 
@@ -23,6 +24,7 @@ type PendingRequest = {
 export class CodexAppServerClient {
   private readonly command: string;
   private readonly cwd: string;
+  private readonly model?: string;
   private readonly debug: (msg: string) => void;
   private proc: ChildProcessWithoutNullStreams | null = null;
   private startPromise: Promise<void> | null = null;
@@ -34,6 +36,7 @@ export class CodexAppServerClient {
   constructor(opts: CodexAppServerClientOptions) {
     this.command = opts.command ?? 'codex';
     this.cwd = opts.cwd;
+    this.model = opts.model;
     this.debug = opts.debug ?? (() => {});
   }
 
@@ -128,6 +131,7 @@ export class CodexAppServerClient {
     await this.request<InitializeResponse>('initialize', {
       clientInfo: { name: 'weixin-codex-bridge', version: '1.0.0' },
       capabilities: { experimentalApi: true },
+      ...(this.model ? { model: this.model } : {}),
     });
   }
 
