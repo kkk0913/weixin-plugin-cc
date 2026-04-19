@@ -16,6 +16,7 @@ const STATE_DIR = ensureStateDirReady();
 const ACCOUNT_FILE = join(STATE_DIR, 'account.json');
 const ACCESS_FILE = join(STATE_DIR, 'access.json');
 const LOGIN_TRIGGER_FILE = join(STATE_DIR, '.login-trigger');
+const SOCKET_FILE = join(STATE_DIR, 'daemon.sock');
 
 const DEFAULT_ACCESS: AccessConfig = {
   mode: 'pairing',
@@ -80,10 +81,94 @@ function printHelp(): void {
   npm run relogin       Clear saved session, then trigger fresh QR login
   npm run clear         Remove saved session
   npm run status        Show current session and access state
+  npm run daemon        Start the daemon in the background (kills stale first)
 `);
 }
 
-function main(): void {
+async function findDaemonPids(): Promise<number[]> {
+  const { execSync } = await import('node:child_process');
+  const patterns = ['bun server\\.ts', 'node server\\.ts', 'tsx server\\.ts'];
+  for (const pattern of patterns) {
+    try {
+      const stdout = execSync(`pgrep -f "${pattern}"`, { encoding: 'utf-8' });
+      const pids = stdout
+        .trim()
+        .split('\n')
+        .map(s => parseInt(s.trim(), 10))
+        .filter(n => Number.isFinite(n) && n > 0 && n !== process.pid);
+      if (pids.length > 0) return pids;
+    } catch {
+      // Try next pattern
+    }
+  }
+  return [];
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) return true;
+    await sleep(200);
+  }
+  return !isProcessAlive(pid);
+}
+
+async function startDaemon(): Promise<void> {
+  const pids = await findDaemonPids();
+  if (pids.length > 0) {
+    for (const pid of pids) {
+      if (!isProcessAlive(pid)) continue;
+      console.log(`Stopping existing daemon (pid=${pid})...`);
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
+    await sleep(500);
+    for (const pid of pids) {
+      if (isProcessAlive(pid)) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // ignore
+        }
+      }
+    }
+    await sleep(300);
+  }
+
+  // Remove stale socket file if any.
+  try {
+    unlinkSync(SOCKET_FILE);
+  } catch {
+    // ignore missing
+  }
+
+  const { spawn } = await import('node:child_process');
+  const child = spawn('bun', ['server.ts'], {
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env, WEIXIN_SERVER_ROLE: 'daemon' },
+  });
+  child.unref();
+  console.log(`Daemon started (pid=${child.pid}). Logs: ${STATE_DIR}/debug.log`);
+}
+
+async function main(): Promise<void> {
   const command = process.argv[2] ?? 'help';
 
   switch (command) {
@@ -107,6 +192,11 @@ function main(): void {
       printStatus();
       return;
 
+    case 'start-daemon':
+    case 'daemon':
+      await startDaemon();
+      return;
+
     case 'help':
     case '--help':
     case '-h':
@@ -120,4 +210,7 @@ function main(): void {
   }
 }
 
-main();
+void main().catch(err => {
+  console.error('Error:', err);
+  process.exit(1);
+});

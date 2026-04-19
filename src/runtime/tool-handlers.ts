@@ -7,7 +7,7 @@ import type {
   BridgeToolCallResult,
 } from '../ipc/protocol.js';
 import { FlagFile } from '../state/flag-file.js';
-import { chunkText, assertSendable } from '../util/helpers.js';
+import { chunkText, assertSendable, foldCommandPreview } from '../util/helpers.js';
 
 export interface PendingPermissionRecord {
   chatId: string;
@@ -45,6 +45,14 @@ export class ClaudeToolHandlers {
     this.autoApproveFlag = new FlagFile(options.autoApproveFile);
   }
 
+  enableAutoApprove(): void {
+    this.autoApproveFlag.enable();
+  }
+
+  disableAutoApprove(): void {
+    this.autoApproveFlag.disable();
+  }
+
   getNextPendingPermissionRequestId(chatId: string): string | null {
     for (const [requestId, record] of this.pendingPermissions) {
       if (record.chatId === chatId) {
@@ -69,6 +77,10 @@ export class ClaudeToolHandlers {
       }
     }
     return count;
+  }
+
+  isAutoApproveEnabled(): boolean {
+    return this.autoApproveFlag.isEnabled();
   }
 
   listPendingPermissionRequestIds(chatId?: string): string[] {
@@ -189,16 +201,16 @@ export class ClaudeToolHandlers {
     });
 
     const lines = [
-      '🔐 权限请求',
-      `操作: ${operation}`,
+      '## 权限请求',
+      `- **操作**：${operation}`,
     ];
     if (params.description) {
-      lines.push(`描述: ${params.description}`);
+      lines.push(`- **描述**：${foldCommandPreview(params.description, { maxLength: 160, maxLines: 4 })}`);
     }
     if (params.input_preview) {
-      lines.push(`内容: ${params.input_preview}`);
+      lines.push(`- **内容**：${foldCommandPreview(params.input_preview)}`);
     }
-    lines.push('', '回复 y/yes 允许，n/no 拒绝，yesall 全部允许');
+    lines.push('', '**可选命令**', '- `y` / `yes`：允许当前请求', '- `n` / `no`：拒绝当前请求', '- `yesall`：允许当前聊天里的全部待审批请求');
     const text = lines.join('\n');
     await this.options.client.sendMessage(chatId, this.options.getContextToken(chatId) ?? '', {
       type: MessageType.TEXT,

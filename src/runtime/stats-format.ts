@@ -1,6 +1,11 @@
 import type { GetAccountRateLimitsResponse, PlanType, RateLimitSnapshot } from '../codex/types.js';
 import type { LocalUsageCache } from '../state/usage-cache-repository.js';
 
+export interface BackendStatsStatus {
+  claudeConnected: boolean;
+  codexConnected: boolean;
+}
+
 function formatTimeRemaining(resetAt: string | null | undefined): string {
   if (!resetAt) return '未知';
   const reset = new Date(resetAt);
@@ -68,6 +73,16 @@ export function formatClaudeUsageText(cache: LocalUsageCache): string {
     text += `7d 已用: ${cache.sevenDay}% | 剩余: ${100 - cache.sevenDay}% | 重置: ${formatTimeRemaining(cache.sevenDayResetAt)}\n`;
   }
   return text;
+}
+
+export function formatBackendStatusText(status: BackendStatsStatus): string {
+  return [
+    '【连接状态】',
+    '━━━━━━━━━━━━━━━━',
+    `Claude Code: ${status.claudeConnected ? '在线' : '离线'}`,
+    `Codex: ${status.codexConnected ? '在线' : '离线'}`,
+    '',
+  ].join('\n');
 }
 
 export function formatCodexRateLimitsText(data: GetAccountRateLimitsResponse, model?: string): string {

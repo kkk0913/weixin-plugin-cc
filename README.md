@@ -106,6 +106,13 @@ npm run clear
 npm test
 ```
 
+Useful WeChat commands:
+
+| Message | Effect |
+|---------|--------|
+| `/stats` | Show Claude Code usage, Codex rate limits, and current backend connection status |
+| `/status` | Show runtime status for the current chat, including active backend, pending approvals, and auto-approve state |
+
 ### Session Expiry
 
 When the session expires, the server stops polling and logs the error code. Run:
@@ -145,6 +152,19 @@ Per-chat backend mode is remembered until changed.
 | `/codex` | Route subsequent messages from this WeChat user to Codex |
 
 Only slash commands are recognized for backend switching to avoid accidental matches in normal conversation.
+
+## Approval Replies
+
+Permission prompts sent back to WeChat can be answered directly in chat.
+
+| Reply | Effect |
+|-------|--------|
+| `y` / `yes` | Approve the current request |
+| `n` / `no` | Deny the current request |
+| `yesall` | Approve all pending requests for the current chat and enable auto-approve |
+| `stopall` | Disable auto-approve |
+
+`/stats` now includes connection health for both backends so you can immediately see whether `Claude Code` or `Codex` is offline.
 
 ## Skills
 

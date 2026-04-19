@@ -134,6 +134,15 @@ function extractChatIdFromInputPreview(inputPreview: string): string | undefined
   return undefined;
 }
 
+export function resolvePermissionChatId(
+  params: z.infer<typeof PERMISSION_REQUEST_NOTIFICATION_SCHEMA>['params'],
+  lastChannelChatId?: string,
+): string | undefined {
+  return params.chat_id
+    ?? extractChatIdFromInputPreview(params.input_preview)
+    ?? lastChannelChatId;
+}
+
 export async function runClaudeProxy(options: ClaudeProxyOptions): Promise<void> {
   const debug = options.debug ?? (() => {});
   const bridge = new DaemonBridgeClient(options.bridgeSocketPath, debug);
@@ -143,6 +152,7 @@ export async function runClaudeProxy(options: ClaudeProxyOptions): Promise<void>
   let registerPromise: Promise<void> | null = null;
   let registerRetryTimer: ReturnType<typeof setInterval> | null = null;
   let registrationRejected = false;
+  let lastChannelChatId: string | undefined;
 
   async function ensureRegistered(): Promise<void> {
     if (registrationRejected) {
@@ -227,6 +237,7 @@ export async function runClaudeProxy(options: ClaudeProxyOptions): Promise<void>
     void (async () => {
       try {
         if (event.method === 'claude/channel') {
+          lastChannelChatId = event.params.meta?.chat_id ?? lastChannelChatId;
           await forwardEventToMcp('notifications/claude/channel', event.params as Record<string, unknown>);
         } else if (event.method === 'claude/permission') {
           await forwardEventToMcp('notifications/claude/channel/permission', event.params as unknown as Record<string, unknown>);
@@ -267,9 +278,13 @@ export async function runClaudeProxy(options: ClaudeProxyOptions): Promise<void>
     PERMISSION_REQUEST_NOTIFICATION_SCHEMA,
     async ({ params }) => {
       await ensureRegistered();
+      const chatId = resolvePermissionChatId(params, lastChannelChatId);
+      if (!chatId) {
+        debug(`permission request missing chat_id after fallback: tool=${params.tool_name} request=${params.request_id}`);
+      }
       await bridge.request('claude/permission_request', {
         ...params,
-        chat_id: params.chat_id ?? extractChatIdFromInputPreview(params.input_preview),
+        chat_id: chatId,
       });
     },
   );

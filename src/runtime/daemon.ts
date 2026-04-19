@@ -134,6 +134,8 @@ const backendManager = new BackendManager({
 const statsService = new StatsService({
   debug: debugLog,
   getCodexBridge: () => backendManager.ensureCodexBridgeStarted(),
+  isClaudeConnected: hasActiveClaudeClient,
+  isCodexConnected: () => backendManager.hasCodexBridge(),
   model: process.env.WEIXIN_CODEX_MODEL?.trim() || undefined,
 });
 
@@ -169,9 +171,32 @@ const backends = {
     inboxDir: INBOX_DIR,
     debug: debugLog,
     resolveBridge: (chatId, contextToken) => backendManager.ensureCodexBackendReady(chatId, contextToken),
+    peekBridge: () => backendManager.getCodexBridge(),
     sendUnavailableMessage: (chatId, contextToken) => backendManager.sendBackendUnavailableMessage('codex', chatId, contextToken),
   }),
 };
+
+async function getStatusText(chatId: string): Promise<string> {
+  backendRoutes.reload();
+  const activeBackend = backendRoutes.getBackend(chatId);
+  const claudeReady = hasActiveClaudeClient();
+  const codexReady = backendManager.hasCodexBridge();
+  const claudePending = backends.claude.getPendingApprovalCount(chatId);
+  const codexPending = backends.codex.getPendingApprovalCount(chatId);
+  const claudeAutoApprove = backends.claude.isAutoApproveEnabled();
+  const codexAutoApprove = backends.codex.isAutoApproveEnabled();
+
+  return [
+    '## 运行状态',
+    `- **当前后端**：${activeBackend}`,
+    `- **Claude 可用**：${claudeReady ? 'yes' : 'no'}`,
+    `- **Codex 可用**：${codexReady ? 'yes' : 'no'}`,
+    `- **Claude 待审批**：${claudePending}`,
+    `- **Codex 待审批**：${codexPending}`,
+    `- **Claude 自动批准**：${claudeAutoApprove ? 'on' : 'off'}`,
+    `- **Codex 自动批准**：${codexAutoApprove ? 'on' : 'off'}`,
+  ].join('\n');
+}
 
 const handleInbound = createInboundRouter({
   inboxDir: INBOX_DIR,
@@ -182,6 +207,7 @@ const handleInbound = createInboundRouter({
   sessionState,
   sendTextMessage,
   getStatsText: () => statsService.getCombinedStatsText(),
+  getStatusText,
   backends,
 });
 

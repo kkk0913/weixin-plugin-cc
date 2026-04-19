@@ -25,6 +25,7 @@ export interface InboundRouterOptions {
   };
   sendTextMessage: (chatId: string, contextToken: string, text: string) => Promise<void>;
   getStatsText: () => Promise<string>;
+  getStatusText: (chatId: string) => Promise<string>;
   backends: Record<BackendRoute, ChatBackend>;
 }
 
@@ -33,6 +34,7 @@ export function createInboundRouter(options: InboundRouterOptions): (msg: Weixin
     debug: options.debug,
     sendTextMessage: options.sendTextMessage,
     getStatsText: options.getStatsText,
+    getStatusText: options.getStatusText,
   });
   const systemMessages = new SystemMessageService({
     debug: options.debug,
@@ -81,6 +83,11 @@ export function createInboundRouter(options: InboundRouterOptions): (msg: Weixin
 
     if (parsed.kind === 'stats') {
       await commands.sendStats(userId, msg.context_token);
+      return;
+    }
+
+    if (parsed.kind === 'status') {
+      await commands.sendStatus(userId, msg.context_token);
       return;
     }
 

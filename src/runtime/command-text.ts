@@ -18,6 +18,7 @@ const BACKEND_ALREADY_ACTIVE_MESSAGES: Record<BackendRoute, string> = {
 const HELP_COMMAND_LINES = [
   '/help 查看帮助',
   '/stats 查看 Claude 用量和 Codex rate limit',
+  '/status 查看当前运行状态',
   '/claude 切换到 Claude Code',
   '/codex 切换到 Codex',
 ];

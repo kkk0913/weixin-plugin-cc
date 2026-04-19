@@ -28,6 +28,11 @@ test('parseInboundMessage detects stats command', () => {
   assert.deepEqual(parsed, { kind: 'stats', text: '/stats' });
 });
 
+test('parseInboundMessage detects status command', () => {
+  const parsed = parseInboundMessage(makeTextMessage('/status'), 'claude');
+  assert.deepEqual(parsed, { kind: 'status', text: '/status' });
+});
+
 test('parseInboundMessage detects approval reply', () => {
   const parsed = parseInboundMessage(makeTextMessage('yes'), 'codex');
   assert.deepEqual(parsed, { kind: 'approval_reply', text: 'yes' });

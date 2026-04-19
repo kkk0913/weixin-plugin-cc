@@ -9,17 +9,20 @@ export interface CommandServiceOptions {
   debug: (msg: string) => void;
   sendTextMessage: (chatId: string, contextToken: string, text: string) => Promise<void>;
   getStatsText: () => Promise<string>;
+  getStatusText: (chatId: string) => Promise<string>;
 }
 
 export class CommandService {
   private readonly debug: (msg: string) => void;
   private readonly sendTextMessage: (chatId: string, contextToken: string, text: string) => Promise<void>;
   private readonly getStatsText: () => Promise<string>;
+  private readonly getStatusText: (chatId: string) => Promise<string>;
 
   constructor(options: CommandServiceOptions) {
     this.debug = options.debug;
     this.sendTextMessage = options.sendTextMessage;
     this.getStatsText = options.getStatsText;
+    this.getStatusText = options.getStatusText;
   }
 
   async sendBackendAlreadyActive(chatId: string, contextToken: string, backend: BackendRoute): Promise<void> {
@@ -32,6 +35,10 @@ export class CommandService {
 
   async sendStats(chatId: string, contextToken: string): Promise<void> {
     await this.sendSafeText(chatId, contextToken, await this.getStatsText(), 'stats');
+  }
+
+  async sendStatus(chatId: string, contextToken: string): Promise<void> {
+    await this.sendSafeText(chatId, contextToken, await this.getStatusText(chatId), 'status');
   }
 
   async sendHelp(chatId: string, contextToken: string, activeBackend: BackendRoute): Promise<void> {

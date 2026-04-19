@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodexBridge } from '../../src/codex/bridge.js';
@@ -136,6 +136,45 @@ test('CodexBridge resolves approval replies and reports result to chat', async (
   assert.equal((bridge as any).approvalManager['pendingApprovals'].size, 0);
 });
 
+test('CodexBridge sends actionable command approval prompt text', async () => {
+  const { bridge, sentTexts } = makeBridge();
+
+  (bridge as any).approvalManager.queueApproval({
+    requestId: 'req-1',
+    method: 'item/commandExecution/requestApproval',
+    chatId: 'user-1',
+    contextToken: 'ctx-1',
+    params: { threadId: 'thread-1', command: 'ls -la' },
+    resolve: () => {},
+  });
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(sentTexts, [{
+    chatId: 'user-1',
+    contextToken: 'ctx-1',
+    text: '## 命令执行\n**类型**：命令执行\n\n---\n\n**操作**：ls -la\n\n---\n\n**可选命令**\n- `y` / `yes`：允许当前请求\n- `n` / `no`：拒绝当前请求\n- `yesall`：允许当前聊天里的全部待审批请求\n- `stopall`：关闭自动批准\n\n---\n\n**可选操作**\n- 直接回复上面的命令即可\n- 如需长期免确认，回复 `yesall`',
+  }]);
+});
+
+test('CodexBridge folds long command approval prompt text', async () => {
+  const { bridge, sentTexts } = makeBridge();
+  const longCommand = `bash -lc "printf 'start\\n'; ${'echo very-long-command && '.repeat(20)}printf 'end\\n'"`;
+
+  (bridge as any).approvalManager.queueApproval({
+    requestId: 'req-1',
+    method: 'item/commandExecution/requestApproval',
+    chatId: 'user-1',
+    contextToken: 'ctx-1',
+    params: { threadId: 'thread-1', command: longCommand },
+    resolve: () => {},
+  });
+
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.match(sentTexts[0]!.text, /\*\*操作\*\*：[\s\S]*\.\.\./);
+});
+
 test('CodexBridge yesall resolves all matching pending approvals', async () => {
   const { bridge, sentTexts } = makeBridge();
   const resolved: unknown[] = [];
@@ -154,6 +193,7 @@ test('CodexBridge yesall resolves all matching pending approvals', async () => {
   const handled = await bridge.maybeHandleApprovalReply('user-1', 'ctx-1', 'yesall');
   assert.equal(handled, true);
   assert.deepEqual(resolved, [{ decision: 'accept' }, { decision: 'accept' }]);
-  assert.deepEqual(sentTexts, [{ chatId: 'user-1', contextToken: 'ctx-1', text: '已全部允许 ✓ (2)' }]);
+  assert.deepEqual(sentTexts, [{ chatId: 'user-1', contextToken: 'ctx-1', text: '已全部允许并开启自动批准 ✓ (2)' }]);
   assert.equal((bridge as any).approvalManager['pendingApprovals'].size, 0);
+  assert.equal(existsSync(join((bridge as any).stateDir, '.auto-approve')), true);
 });

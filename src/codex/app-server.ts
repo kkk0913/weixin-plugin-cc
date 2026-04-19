@@ -14,6 +14,7 @@ export interface CodexAppServerClientOptions {
   cwd: string;
   model?: string;
   debug?: (msg: string) => void;
+  onProcessExit?: () => void;
 }
 
 type PendingRequest = {
@@ -26,6 +27,7 @@ export class CodexAppServerClient {
   private readonly cwd: string;
   private readonly model?: string;
   private readonly debug: (msg: string) => void;
+  private readonly onProcessExit?: () => void;
   private proc: ChildProcessWithoutNullStreams | null = null;
   private startPromise: Promise<void> | null = null;
   private nextId = 1;
@@ -38,6 +40,7 @@ export class CodexAppServerClient {
     this.cwd = opts.cwd;
     this.model = opts.model;
     this.debug = opts.debug ?? (() => {});
+    this.onProcessExit = opts.onProcessExit;
   }
 
   setNotificationHandler(handler: (notification: JsonRpcNotification) => void): void {
@@ -216,6 +219,7 @@ export class CodexAppServerClient {
       this.pending.delete(id);
       pending.reject(error);
     }
+    this.onProcessExit?.();
   }
 }
 

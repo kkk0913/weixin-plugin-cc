@@ -84,6 +84,14 @@ export class BackendManager {
     }
   }
 
+  hasCodexBridge(): boolean {
+    return this.codexBridge !== null;
+  }
+
+  getCodexBridge(): CodexBridge | null {
+    return this.codexBridge;
+  }
+
   async sendBackendUnavailableMessage(
     backend: BackendRoute,
     chatId: string,

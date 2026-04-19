@@ -86,6 +86,34 @@ export function chunkText(text: string, maxLength: number): string[] {
   return result;
 }
 
+/**
+ * Collapse long command or preview text for chat delivery.
+ * Preserve a few lines and add an ellipsis when content is truncated.
+ */
+export function foldCommandPreview(
+  text: string | null | undefined,
+  options: { maxLength?: number; maxLines?: number } = {},
+): string {
+  const maxLength = options.maxLength ?? 240;
+  const maxLines = options.maxLines ?? 6;
+  const normalized = (text ?? '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return '(empty)';
+  }
+
+  const lines = normalized.split('\n');
+  const limitedLines = lines.slice(0, maxLines);
+  let preview = limitedLines.join('\n');
+  let truncated = lines.length > maxLines;
+
+  if (preview.length > maxLength) {
+    preview = preview.slice(0, Math.max(1, maxLength - 1)).trimEnd();
+    truncated = true;
+  }
+
+  return truncated ? `${preview}\n...` : preview;
+}
+
 // ─── File Helpers ───────────────────────────────────────────────────
 const SAFE_INBOX_SUBDIR = 'inbox';
 

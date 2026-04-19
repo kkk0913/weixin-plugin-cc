@@ -96,6 +96,10 @@ export class CodexBridge {
       cwd: this.cwd,
       model: this.model,
       debug: this.debug,
+      onProcessExit: () => {
+        this.debug('codex app-server exited, clearing active turns');
+        this.turnState.clearActiveTurns();
+      },
     });
     this.threadManager = new CodexThreadManager({
       stateDir: this.stateDir,
@@ -137,6 +141,11 @@ export class CodexBridge {
 
     const activeTurnId = this.turnState.getActiveTurnId(threadId);
     if (activeTurnId) {
+      if (this.approvalManager.hasPendingApprovalsForChat(message.chatId)) {
+        this.debug(`codex approval/resend: chat=${message.chatId} thread=${threadId} turn=${activeTurnId}`);
+        await this.approvalManager.resendPendingApprovals(message.chatId, message.contextToken);
+        return;
+      }
       this.debug(`codex steer: chat=${message.chatId} thread=${threadId} turn=${activeTurnId}`);
       await this.client.request('turn/steer', {
         threadId,
@@ -156,6 +165,14 @@ export class CodexBridge {
 
   async maybeHandleApprovalReply(chatId: string, contextToken: string, text: string): Promise<boolean> {
     return this.approvalManager.maybeHandleApprovalReply(chatId, contextToken, text);
+  }
+
+  isAutoApproveEnabled(): boolean {
+    return this.approvalManager.isAutoApproveEnabled();
+  }
+
+  getPendingApprovalCount(chatId?: string): number {
+    return this.approvalManager.getPendingApprovalCount(chatId);
   }
 
   async getRateLimits(): Promise<GetAccountRateLimitsResponse | null> {

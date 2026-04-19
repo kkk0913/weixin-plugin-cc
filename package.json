@@ -14,6 +14,7 @@
     "relogin": "bun weixin-cli.ts relogin",
     "clear": "bun weixin-cli.ts clear",
     "status": "bun weixin-cli.ts status",
+    "daemon": "bun weixin-cli.ts daemon",
     "dev": "tsc --watch"
   },
   "dependencies": {

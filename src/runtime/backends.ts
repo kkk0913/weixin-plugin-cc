@@ -31,6 +31,7 @@ export interface CodexBackendAdapterOptions {
   inboxDir: string;
   debug: (msg: string) => void;
   resolveBridge: (chatId: string, contextToken: string) => Promise<CodexBridge | null>;
+  peekBridge?: () => CodexBridge | null;
   sendUnavailableMessage: (chatId: string, contextToken: string) => Promise<void>;
 }
 
@@ -54,10 +55,11 @@ export class ClaudeBackendAdapter implements ChatBackend {
       if (requestIds.length === 0) {
         return false;
       }
+      this.options.toolHandlers.enableAutoApprove();
       for (const requestId of requestIds) {
         await this.options.toolHandlers.sendPermissionDecision(requestId, 'allow');
       }
-      await this.sendSafeText(chatId, contextToken, `已全部允许 ✓ (${requestIds.length})`, 'yesall confirmation');
+      await this.sendSafeText(chatId, contextToken, `已全部允许并开启自动批准 ✓ (${requestIds.length})`, 'yesall confirmation');
       return true;
     }
 
@@ -132,6 +134,14 @@ export class ClaudeBackendAdapter implements ChatBackend {
     this.options.debug(`handleInbound: delivered to claude for ${msg.from_user_id}`);
   }
 
+  getPendingApprovalCount(chatId?: string): number {
+    return this.options.toolHandlers.getPendingPermissionCount(chatId);
+  }
+
+  isAutoApproveEnabled(): boolean {
+    return this.options.toolHandlers.isAutoApproveEnabled();
+  }
+
   private async sendSafeText(chatId: string, contextToken: string, text: string, label: string): Promise<void> {
     try {
       await this.options.sendTextMessage(chatId, contextToken, text);
@@ -186,5 +196,19 @@ export class CodexBackendAdapter implements ChatBackend {
       this.options.debug(`handleInbound: codex delivery failed for ${msg.from_user_id}: ${err}`);
       await this.options.sendUnavailableMessage(msg.from_user_id, msg.context_token);
     });
+  }
+
+  async isReady(chatId: string, contextToken: string): Promise<boolean> {
+    return Boolean(await this.options.resolveBridge(chatId, contextToken));
+  }
+
+  getPendingApprovalCount(chatId?: string): number {
+    const bridge = this.options.peekBridge?.();
+    return bridge?.getPendingApprovalCount(chatId) ?? 0;
+  }
+
+  isAutoApproveEnabled(): boolean {
+    const bridge = this.options.peekBridge?.();
+    return bridge?.isAutoApproveEnabled() ?? false;
   }
 }

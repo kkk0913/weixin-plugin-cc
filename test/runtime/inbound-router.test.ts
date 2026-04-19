@@ -75,6 +75,7 @@ test('inbound router dispatches normal chat to active backend', async () => {
       sentTexts.push(text);
     },
     getStatsText: async () => 'stats',
+    getStatusText: async () => 'status',
     backends: {
       claude: claude.backend,
       codex: codex.backend,
@@ -120,6 +121,7 @@ test('inbound router handles backend switch before delivery', async () => {
       sentTexts.push(text);
     },
     getStatsText: async () => 'stats',
+    getStatusText: async () => 'status',
     backends: {
       claude: claude.backend,
       codex: codex.backend,
@@ -164,6 +166,7 @@ test('inbound router routes stats command to text response', async () => {
       sentTexts.push(text);
     },
     getStatsText: async () => 'stats-output',
+    getStatusText: async () => 'status-output',
     backends: {
       claude: claude.backend,
       codex: codex.backend,
@@ -172,6 +175,48 @@ test('inbound router routes stats command to text response', async () => {
 
   await router(makeTextMessage('/stats'));
   assert.deepEqual(sentTexts, ['stats-output']);
+  assert.equal(claude.calls.deliver.length, 0);
+});
+
+test('inbound router routes status command to text response', async () => {
+  const claude = makeBackend('claude');
+  const codex = makeBackend('codex');
+  const sentTexts: string[] = [];
+
+  const router = createInboundRouter({
+    inboxDir: '/tmp',
+    debug: () => {},
+    access: {
+      reload: () => {},
+      gate: () => ({ action: 'deliver' }),
+    },
+    client: {
+      isAuthed: false,
+      sendMessage: async () => ({}),
+      getConfig: async () => ({ typing_ticket: '' }),
+      sendTyping: async () => ({}),
+    },
+    backendRoutes: {
+      reload: () => {},
+      getBackend: () => 'claude',
+      setBackend: () => {},
+    } as any,
+    sessionState: {
+      setContextToken: () => {},
+    },
+    sendTextMessage: async (_chatId, _contextToken, text) => {
+      sentTexts.push(text);
+    },
+    getStatsText: async () => 'stats-output',
+    getStatusText: async () => 'status-output',
+    backends: {
+      claude: claude.backend,
+      codex: codex.backend,
+    },
+  });
+
+  await router(makeTextMessage('/status'));
+  assert.deepEqual(sentTexts, ['status-output']);
   assert.equal(claude.calls.deliver.length, 0);
 });
 
@@ -202,6 +247,7 @@ test('inbound router stops when approval reply is consumed', async () => {
     },
     sendTextMessage: async () => {},
     getStatsText: async () => 'stats-output',
+    getStatusText: async () => 'status-output',
     backends: {
       claude: claude.backend,
       codex: codex.backend,

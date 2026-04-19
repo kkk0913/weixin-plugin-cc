@@ -1,4 +1,5 @@
 import { FlagFile } from '../state/flag-file.js';
+import { foldCommandPreview } from '../util/helpers.js';
 import type {
   CodexServerRequest,
   CommandExecutionRequestApprovalParams,
@@ -65,6 +66,24 @@ export class CodexApprovalManager {
     void this.sendText(approval.chatId, approval.contextToken, this.formatApprovalRequest(approval));
   }
 
+  hasPendingApprovalsForChat(chatId: string): boolean {
+    return this.listPendingApprovals(chatId).length > 0;
+  }
+
+  getPendingApprovalCount(chatId?: string): number {
+    if (!chatId) {
+      return this.pendingApprovals.size;
+    }
+    return this.listPendingApprovals(chatId).length;
+  }
+
+  async resendPendingApprovals(chatId: string, contextToken: string): Promise<void> {
+    const approvals = this.listPendingApprovals(chatId);
+    for (const approval of approvals) {
+      await this.sendText(chatId, contextToken, this.formatApprovalRequest(approval));
+    }
+  }
+
   async maybeHandleApprovalReply(chatId: string, contextToken: string, text: string): Promise<boolean> {
     const trimmed = text.trim().toLowerCase();
 
@@ -73,10 +92,11 @@ export class CodexApprovalManager {
       if (approvals.length === 0) {
         return false;
       }
+      this.autoApproveFlag.enable();
       for (const approval of approvals) {
         await this.resolveApproval(approval, true, false);
       }
-      await this.sendText(chatId, contextToken, `已全部允许 ✓ (${approvals.length})`);
+      await this.sendText(chatId, contextToken, `已全部允许并开启自动批准 ✓ (${approvals.length})`);
       return true;
     }
 
@@ -155,34 +175,61 @@ export class CodexApprovalManager {
   }
 
   private formatApprovalRequest(approval: PendingApproval): string {
-    if (approval.method === 'item/commandExecution/requestApproval') {
-      return this.formatCommandApproval(approval.params as CommandExecutionRequestApprovalParams);
-    }
-    if (approval.method === 'item/fileChange/requestApproval') {
-      return this.formatFileChangeApproval(approval.params as FileChangeRequestApprovalParams);
-    }
-    return this.formatPermissionsApproval(approval.params as PermissionsRequestApprovalParams);
-  }
-
-  private formatCommandApproval(params: CommandExecutionRequestApprovalParams): string {
+    const lines = approval.method === 'item/commandExecution/requestApproval'
+      ? this.formatCommandApproval(approval.params as CommandExecutionRequestApprovalParams)
+      : approval.method === 'item/fileChange/requestApproval'
+        ? this.formatFileChangeApproval(approval.params as FileChangeRequestApprovalParams)
+        : this.formatPermissionsApproval(approval.params as PermissionsRequestApprovalParams);
     return [
-      '类型: 命令执行',
-      `操作: ${params.command ?? params.reason ?? '执行命令'}`,
+      ...lines,
+      '',
+      '---',
+      '',
+      '**可选命令**',
+      '- `y` / `yes`：允许当前请求',
+      '- `n` / `no`：拒绝当前请求',
+      '- `yesall`：允许当前聊天里的全部待审批请求',
+      '- `stopall`：关闭自动批准',
+      '',
+      '---',
+      '',
+      '**可选操作**',
+      '- 直接回复上面的命令即可',
+      '- 如需长期免确认，回复 `yesall`',
     ].join('\n');
   }
 
-  private formatFileChangeApproval(params: FileChangeRequestApprovalParams): string {
+  private formatCommandApproval(params: CommandExecutionRequestApprovalParams): string[] {
     return [
-      '类型: 文件变更',
-      `操作: ${params.reason ?? params.grantRoot ?? '修改文件'}`,
-    ].join('\n');
+      '## 命令执行',
+      '**类型**：命令执行',
+      '',
+      '---',
+      '',
+      `**操作**：${foldCommandPreview(params.command ?? params.reason ?? '执行命令')}`,
+    ];
   }
 
-  private formatPermissionsApproval(params: PermissionsRequestApprovalParams): string {
+  private formatFileChangeApproval(params: FileChangeRequestApprovalParams): string[] {
     return [
-      '类型: 权限申请',
-      `操作: ${params.reason ?? this.formatRequestedPermissions(params.permissions)}`,
-    ].join('\n');
+      '## 文件变更',
+      `**类型**：文件变更`,
+      '',
+      '---',
+      '',
+      `- **操作**：${foldCommandPreview(params.reason ?? params.grantRoot ?? '修改文件', { maxLength: 160, maxLines: 4 })}`,
+    ];
+  }
+
+  private formatPermissionsApproval(params: PermissionsRequestApprovalParams): string[] {
+    return [
+      '## 权限申请',
+      `**类型**：权限申请`,
+      '',
+      '---',
+      '',
+      `- **操作**：${foldCommandPreview(params.reason ?? this.formatRequestedPermissions(params.permissions), { maxLength: 160, maxLines: 4 })}`,
+    ];
   }
 
   private formatRequestedPermissions(permissions: RequestPermissionProfile): string {

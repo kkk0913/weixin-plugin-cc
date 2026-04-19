@@ -73,6 +73,10 @@ export class CodexTurnState {
       : notification.error.message;
   }
 
+  clearActiveTurns(): void {
+    this.activeTurns.clear();
+  }
+
   completeTurn(notification: TurnCompletedNotification): CompletedTurnResult {
     const turn = this.turnContexts.get(notification.turn.id) ?? null;
     this.turnContexts.delete(notification.turn.id);
