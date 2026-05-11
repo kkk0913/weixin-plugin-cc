@@ -120,7 +120,7 @@ function sendBridgePermissionDecision(requestId: string, behavior: 'allow' | 'de
 
 const backendManager = new BackendManager({
   stateDir: STATE_DIR,
-  cwd: expandTilde(process.env.WEIXIN_CODEX_CWD?.trim() || process.cwd()),
+  cwd: expandTilde(process.env.WEIXIN_CODEX_DIR?.trim() || process.cwd()),
   codexCommand: process.env.WEIXIN_CODEX_COMMAND?.trim() || undefined,
   model: process.env.WEIXIN_CODEX_MODEL?.trim() || undefined,
   approvalPolicy: (process.env.WEIXIN_CODEX_APPROVAL_POLICY?.trim() as any) || 'on-request',

@@ -21,10 +21,6 @@ WeChat bridge for Claude Code and Codex.
 
 ## Installation
 
-Standalone Claude Code plugin mode is no longer supported. You must run the daemon from a local clone of this repository first, then connect Claude Code to it.
-
-### 1. Clone And Start The Daemon
-
 Clone the repository locally:
 
 ```bash
@@ -32,7 +28,7 @@ git clone https://github.com/kkk0913/weixin-plugin-cc-cx.git
 cd weixin-plugin-cc-cx
 ```
 
-Start the daemon from the cloned repo:
+Start the daemon:
 
 ```bash
 bun run start
@@ -40,13 +36,11 @@ bun run start
 
 Optional environment variables can be set either in your shell or in a project-root `.env` file. See [.env.example](/home/demon/workspace/weixin-plugin-cc-cx/.env.example).
 
-Optional environment variables:
-
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WEIXIN_STATE_DIR` | `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx` | State directory for session, routes, socket, cache, and inbox |
 | `WEIXIN_CLAUDE_CONFIG_DIR` | `~/.claude` | Claude local config directory used for `.credentials.json` and `stats-cache.json` |
-| `WEIXIN_CODEX_CWD` | current working directory | Workspace passed to `codex -C ... app-server` |
+| `WEIXIN_CODEX_DIR` | current working directory | Workspace passed to `codex -C ... app-server` |
 | `WEIXIN_CODEX_MODEL` | unset | Override Codex model |
 | `WEIXIN_CODEX_APPROVAL_POLICY` | `on-request` | Codex approval policy |
 | `WEIXIN_CODEX_SANDBOX` | `workspace-write` | Codex sandbox mode |
@@ -57,50 +51,22 @@ Optional environment variables:
 Example:
 
 ```bash
-WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 bun run start
+WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_DIR=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 bun run start
 ```
-
-### 2. Connect Claude Code
-
-Add the marketplace in Claude Code:
-
-```text
-/plugin marketplace add kkk0913/weixin-plugin-cc-cx
-```
-
-Install the plugin:
-
-```text
-/plugin install weixin@weixin-plugin-cc-cx
-```
-
-Reload plugins.
-
-Start Claude Code with the development channels flag:
-
-```bash
-claude --dangerously-load-development-channels plugin:weixin@weixin-plugin-cc-cx
-```
-
-The Claude plugin process no longer polls WeChat by itself. It only proxies Claude's MCP channel over a local socket to the daemon started from your local clone.
 
 ## First Run
-
-Prefer the bun entrypoints for setup and login. The cc skills remain available, but they are secondary.
 
 1. Start the daemon with `bun run start`
 2. Check current state with `bun run status`
 3. Trigger login with `bun run login`
-4. If Claude Code needs to reconnect its local proxy, run `/reload-plugins`
-5. The daemon prints a browser login link to stderr — open it in your browser and scan with WeChat within 8 minutes
-6. Session is saved under `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json` by default, or `WEIXIN_STATE_DIR` if set
-
-Use bun scripts for setup and login (no skill equivalent):
+4. The daemon prints a browser login link to stderr — open it in your browser and scan with WeChat within 8 minutes
+5. Session is saved under `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json` by default, or `WEIXIN_STATE_DIR` if set
 
 Useful CLI helpers:
 
 ```bash
 bun run status
+bun run pair <code>
 bun run relogin
 bun run clear
 bun run stop
@@ -123,15 +89,13 @@ bun run clear
 bun run login
 ```
 
-Then `/reload-plugins` if Claude Code needs to reconnect. Use `bun run clear` and `bun run login` for session management.
-
 ## Access Control
 
 New WeChat users require pairing by default:
 
 1. Unknown user sends a message
 2. Server generates a 6-char pairing code and replies to the user
-3. Approve in your terminal: `/weixin:access pair <code>`
+3. Approve in your terminal: `bun run pair <code>`
 4. User is added to the allowlist
 
 Modes (configured in `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/access.json` by default):
@@ -141,6 +105,38 @@ Modes (configured in `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/acce
 | `pairing` | New users get a pairing code (default) |
 | `allowlist` | Only pre-approved users can message |
 | `disabled` | All inbound messages are dropped |
+
+## Connect a Backend (Optional)
+
+Once the daemon is running and users are paired, choose a backend to handle incoming messages.
+
+### Claude Code
+
+Add the marketplace in Claude Code:
+
+```text
+/plugin marketplace add kkk0913/weixin-plugin-cc-cx
+```
+
+Install the plugin:
+
+```text
+/plugin install weixin@weixin-plugin-cc-cx
+```
+
+Reload plugins, then start Claude Code with the development channels flag:
+
+```bash
+claude --dangerously-load-development-channels plugin:weixin@weixin-plugin-cc-cx
+```
+
+The Claude plugin process only proxies Claude's MCP channel over a local socket to the daemon. It does not poll WeChat by itself.
+
+If Claude Code disconnects, run `/reload-plugins` to reconnect.
+
+### Codex
+
+No additional setup is required. When a WeChat user sends `/codex`, the daemon automatically starts a `codex app-server` subprocess and routes messages to it. Configure the Codex workspace and model via environment variables (see [Installation](#installation)).
 
 ## Backend Switching
 
@@ -173,8 +169,7 @@ These skills are optional terminal shortcuts, not the primary workflow.
 
 | Skill | Description |
 |-------|-------------|
-| `/weixin:access` | Manage access control (pair, allow, remove, policy) |
-| `/weixin:permission` | Manage permission mode (auto-approve, manual, bypass) |
+| `/weixin:status` | Show daemon and connection status |
 
 ## MCP Tools
 
@@ -290,10 +285,8 @@ test/
     └── inbound.test.ts
 
 skills/
-├── access/
-│   └── SKILL.md           # Access control skill
-└── permission/
-    └── SKILL.md           # Permission mode management skill
+└── status/
+    └── SKILL.md           # Status check skill
 ```
 
 ## State Directory

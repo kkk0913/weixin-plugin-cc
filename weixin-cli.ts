@@ -75,14 +75,41 @@ function printStatus(): void {
   }
 }
 
+function approvePairing(code: string): void {
+  const access = loadAccess();
+  const pendingEntries = Object.entries(access.pendingUsers);
+  const match = pendingEntries.find(([, c]) => c === code);
+  if (!match) {
+    console.error(`Pairing code not found: ${code}`);
+    console.error('Pending pairings:');
+    if (pendingEntries.length === 0) {
+      console.error('  (none)');
+    } else {
+      for (const [userId, c] of pendingEntries) {
+        console.error(`  ${c}: ${userId}`);
+      }
+    }
+    process.exitCode = 1;
+    return;
+  }
+  const [userId] = match;
+  if (!access.allowedUsers.includes(userId)) {
+    access.allowedUsers.push(userId);
+  }
+  delete access.pendingUsers[userId];
+  writeFileSync(ACCESS_FILE, JSON.stringify(access, null, 2));
+  console.log(`Approved: ${userId}`);
+}
+
 function printHelp(): void {
   console.log(`Usage:
-  npm run login         Trigger QR login in the running server
-  npm run relogin       Clear saved session, then trigger fresh QR login
-  npm run clear         Remove saved session
-  npm run status        Show current session and access state
-  npm run daemon        Start the daemon in the background (kills stale first)
-  npm run stop          Stop the running daemon
+  bun run login         Trigger QR login in the running server
+  bun run relogin       Clear saved session, then trigger fresh QR login
+  bun run clear         Remove saved session
+  bun run status        Show current session and access state
+  bun run pair <code>   Approve a pending pairing by code
+  bun run daemon        Start the daemon in the background (kills stale first)
+  bun run stop          Stop the running daemon
 `);
 }
 
@@ -199,6 +226,17 @@ async function main(): Promise<void> {
     case 'status':
       printStatus();
       return;
+
+    case 'pair': {
+      const code = process.argv[3];
+      if (!code) {
+        console.error('Usage: bun run pair <code>');
+        process.exitCode = 1;
+        return;
+      }
+      approvePairing(code);
+      return;
+    }
 
     case 'stop':
       await stopDaemon();

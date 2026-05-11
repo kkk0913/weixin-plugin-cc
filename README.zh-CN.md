@@ -1,6 +1,6 @@
 # weixin-plugin-cc-cx
 
-[![English](https://img.shields.io/badge/README-English-blue)](README.md)
+[English](README.md)
 
 Claude Code / Codex 微信桥接器。
 
@@ -42,22 +42,24 @@ bun run start
 
 可选环境变量：
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `WEIXIN_STATE_DIR` | `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx` | 会话、路由、socket、缓存、inbox 的状态目录 |
-| `WEIXIN_CLAUDE_CONFIG_DIR` | `~/.claude` | Claude 本地配置目录，用于读取 `.credentials.json` 和 `stats-cache.json` |
-| `WEIXIN_CODEX_CWD` | 当前工作目录 | 传给 `codex -C ... app-server` 的工作区 |
-| `WEIXIN_CODEX_MODEL` | 未设置 | 覆盖 Codex 模型 |
-| `WEIXIN_CODEX_APPROVAL_POLICY` | `on-request` | Codex 审批策略 |
-| `WEIXIN_CODEX_SANDBOX` | `workspace-write` | Codex 沙箱模式 |
-| `WEIXIN_CODEX_COMMAND` | `codex` | Codex CLI 可执行文件 |
+
+| 变量                             | 默认值                                                     | 说明                                                          |
+| ------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------- |
+| `WEIXIN_STATE_DIR`             | `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx` | 会话、路由、socket、缓存、inbox 的状态目录                                 |
+| `WEIXIN_CLAUDE_CONFIG_DIR`     | `~/.claude`                                             | Claude 本地配置目录，用于读取 `.credentials.json` 和 `stats-cache.json` |
+| `WEIXIN_CODEX_DIR`             | 当前工作目录                                                  | 传给 `codex -C ... app-server` 的工作区                           |
+| `WEIXIN_CODEX_MODEL`           | 未设置                                                     | 覆盖 Codex 模型                                                 |
+| `WEIXIN_CODEX_APPROVAL_POLICY` | `on-request`                                            | Codex 审批策略                                                  |
+| `WEIXIN_CODEX_SANDBOX`         | `workspace-write`                                       | Codex 沙箱模式                                                  |
+| `WEIXIN_CODEX_COMMAND`         | `codex`                                                 | Codex CLI 可执行文件                                             |
+
 
 `WEIXIN_CLAUDE_CONFIG_DIR` 只用于读取本地 Claude 文件，例如 `.credentials.json` 和 `stats-cache.json`。Claude Code 本身仍然是通过 daemon 管理的本地 proxy/socket 连接。
 
 示例：
 
 ```bash
-WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 bun run start
+WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_DIR=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 bun run start
 ```
 
 ### 2. 再连接 Claude Code
@@ -86,21 +88,17 @@ Claude 插件进程现在不会自己轮询微信，只负责通过本地 socket
 
 ## 首次使用
 
-启动和登录优先使用 bun 脚本。cc skill 仍可用，但作为次选入口。
-
 1. 先运行 `bun run start` 启动守护进程
 2. 用 `bun run status` 检查当前状态
 3. 用 `bun run login` 触发登录
-4. 如果 Claude Code 需要重连本地代理，再执行 `/reload-plugins`
-5. 守护进程会输出一个浏览器登录链接，在浏览器中打开并用微信扫码（8 分钟内有效）
-6. 默认保存在 `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json`，如果设置了 `WEIXIN_STATE_DIR` 则保存在该目录下
-
-使用 bun 脚本进行设置和登录（无 skill 等价命令）：
+4. 守护进程会输出一个浏览器登录链接，在浏览器中打开并用微信扫码（8 分钟内有效）
+5. 默认保存在 `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json`，如果设置了 `WEIXIN_STATE_DIR` 则保存在该目录下
 
 常用 CLI 命令：
 
 ```bash
 bun run status
+bun run pair <code>
 bun run relogin
 bun run clear
 bun run stop
@@ -109,10 +107,10 @@ bun test
 
 常用微信命令：
 
-| 消息 | 效果 |
-|------|------|
-| `/stats` | 查看 Claude Code 用量、Codex rate limit，以及当前后端连接状态 |
-| `/status` | 查看当前聊天的运行状态，包括当前后端、待审批数量和自动批准状态 |
+| 消息        | 效果                                            |
+| --------- | --------------------------------------------- |
+| `/stats`  | 查看 Claude Code 用量、Codex rate limit，以及当前后端连接状态 |
+| `/status` | 查看当前聊天的运行状态，包括当前后端、待审批数量和自动批准状态               |
 
 ### 会话过期
 
@@ -123,34 +121,65 @@ bun run clear
 bun run login
 ```
 
-如果 Claude Code 需要重连，再执行 `/reload-plugins`。会话管理请使用 `bun run clear` 和 `bun run login`。
-
 ## 访问控制
 
 新微信用户默认需要配对：
 
 1. 未知用户发送消息
 2. 服务生成 6 位配对码并回复给用户
-3. 在终端中批准：`/weixin:access pair <code>`
+3. 在终端中批准：`bun run pair <code>`
 4. 用户被添加到白名单
 
 模式（默认配置在 `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/access.json`）：
 
-| 模式 | 行为 |
-|------|------|
-| `pairing` | 新用户获得配对码（默认） |
-| `allowlist` | 仅白名单用户可发消息 |
-| `disabled` | 丢弃所有消息 |
+
+| 模式          | 行为           |
+| ----------- | ------------ |
+| `pairing`   | 新用户获得配对码（默认） |
+| `allowlist` | 仅白名单用户可发消息   |
+| `disabled`  | 丢弃所有消息       |
+
+## 连接后端（可选）
+
+daemon 运行并配对完成后，选择一个后端处理消息。
+
+### Claude Code
+
+在 Claude Code 中添加 marketplace：
+
+```text
+/plugin marketplace add kkk0913/weixin-plugin-cc-cx
+```
+
+安装插件：
+
+```text
+/plugin install weixin@weixin-plugin-cc-cx
+```
+
+重新加载插件，然后使用开发频道标志启动：
+
+```bash
+claude --dangerously-load-development-channels plugin:weixin@weixin-plugin-cc-cx
+```
+
+Claude 插件进程只负责通过本地 socket 把 MCP channel 转发给 daemon，不会自己轮询微信。如果断开连接，执行 `/reload-plugins` 重新连接。
+
+### Codex
+
+无需额外配置。当微信用户发送 `/codex` 时，daemon 会自动启动 `codex app-server` 子进程并转发消息。可通过环境变量配置工作区和模型（见[安装](#安装)）。
 
 ## 后端切换
 
 每个微信聊天都会记住当前后端，直到再次切换。
 
-| 消息 | 效果 |
-|------|------|
+
+| 消息        | 效果                  |
+| --------- | ------------------- |
 | `/claude` | 后续消息转发给 Claude Code |
-| `/cc` | 等同于 `/claude` |
-| `/codex` | 后续消息转发给 Codex |
+| `/cc`     | 等同于 `/claude`       |
+| `/codex`  | 后续消息转发给 Codex       |
+
 
 为避免和普通对话混淆，后端切换现在只识别带 `/` 的显式命令。
 
@@ -158,12 +187,14 @@ bun run login
 
 发到微信里的审批请求可以直接通过回复文本处理。
 
-| 回复 | 效果 |
-|------|------|
-| `y` / `yes` | 允许当前请求 |
-| `n` / `no` | 拒绝当前请求 |
-| `yesall` | 允许当前聊天里所有待审批请求，并开启自动批准 |
-| `stopall` | 关闭自动批准 |
+
+| 回复          | 效果                     |
+| ----------- | ---------------------- |
+| `y` / `yes` | 允许当前请求                 |
+| `n` / `no`  | 拒绝当前请求                 |
+| `yesall`    | 允许当前聊天里所有待审批请求，并开启自动批准 |
+| `stopall`   | 关闭自动批准                 |
+
 
 `/stats` 现在会额外显示两个后端的连接状态，能直接看出 `Claude Code` 或 `Codex` 是否掉线。
 
@@ -171,19 +202,22 @@ bun run login
 
 这些 skill 只是可选快捷入口，不是主流程。
 
-| Skill | 说明 |
-|-------|------|
-| `/weixin:access` | 管理访问控制（配对、添加、移除、策略） |
-| `/weixin:permission` | 管理权限模式（自动批准、手动、绕过） |
+
+| Skill            | 说明              |
+| ---------------- | ----------------- |
+| `/weixin:status` | 查看 daemon 和连接状态 |
+
 
 ## MCP 工具
 
-| 工具 | 说明 |
-|------|------|
-| `reply` | 发送文本和附件给微信用户 |
-| `react` | 不支持（微信无表情回应功能） |
-| `download_attachment` | 下载消息中的媒体文件到本地 |
-| `edit_message` | 发送新消息替代（微信无编辑功能） |
+
+| 工具                    | 说明               |
+| --------------------- | ---------------- |
+| `reply`               | 发送文本和附件给微信用户     |
+| `react`               | 不支持（微信无表情回应功能）   |
+| `download_attachment` | 下载消息中的媒体文件到本地    |
+| `edit_message`        | 发送新消息替代（微信无编辑功能） |
+
 
 ## 流程图
 
@@ -290,10 +324,8 @@ test/
     └── inbound.test.ts
 
 skills/
-├── access/
-│   └── SKILL.md           # 访问控制 skill
-└── permission/
-    └── SKILL.md           # 权限管理模式 skill
+└── status/
+    └── SKILL.md           # 状态查看 skill
 ```
 
 ## 状态目录
