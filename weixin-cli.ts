@@ -82,6 +82,7 @@ function printHelp(): void {
   npm run clear         Remove saved session
   npm run status        Show current session and access state
   npm run daemon        Start the daemon in the background (kills stale first)
+  npm run stop          Stop the running daemon
 `);
 }
 
@@ -126,12 +127,14 @@ async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
   return !isProcessAlive(pid);
 }
 
-async function startDaemon(): Promise<void> {
+async function stopDaemon(): Promise<void> {
   const pids = await findDaemonPids();
-  if (pids.length > 0) {
+  if (pids.length === 0) {
+    console.log('No daemon is running.');
+  } else {
     for (const pid of pids) {
       if (!isProcessAlive(pid)) continue;
-      console.log(`Stopping existing daemon (pid=${pid})...`);
+      console.log(`Stopping daemon (pid=${pid})...`);
       try {
         process.kill(pid, 'SIGTERM');
       } catch {
@@ -149,6 +152,7 @@ async function startDaemon(): Promise<void> {
       }
     }
     await sleep(300);
+    console.log('Daemon stopped.');
   }
 
   // Remove stale socket file if any.
@@ -157,6 +161,10 @@ async function startDaemon(): Promise<void> {
   } catch {
     // ignore missing
   }
+}
+
+async function startDaemon(): Promise<void> {
+  await stopDaemon();
 
   const { spawn } = await import('node:child_process');
   const child = spawn('bun', ['server.ts'], {
@@ -190,6 +198,10 @@ async function main(): Promise<void> {
 
     case 'status':
       printStatus();
+      return;
+
+    case 'stop':
+      await stopDaemon();
       return;
 
     case 'start-daemon':

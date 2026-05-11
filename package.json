@@ -15,6 +15,7 @@
     "clear": "bun weixin-cli.ts clear",
     "status": "bun weixin-cli.ts status",
     "daemon": "bun weixin-cli.ts daemon",
+    "stop": "bun weixin-cli.ts stop",
     "dev": "tsc --watch"
   },
   "dependencies": {

@@ -103,6 +103,7 @@ Useful CLI helpers:
 npm run status
 npm run relogin
 npm run clear
+npm run stop
 npm test
 ```
 

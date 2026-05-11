@@ -103,6 +103,7 @@ Claude 插件进程现在不会自己轮询微信，只负责通过本地 socket
 npm run status
 npm run relogin
 npm run clear
+npm run stop
 npm test
 ```
 
