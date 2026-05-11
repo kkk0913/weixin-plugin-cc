@@ -35,7 +35,7 @@ cd weixin-plugin-cc-cx
 Start the daemon from the cloned repo:
 
 ```bash
-npm run start
+bun run start
 ```
 
 Optional environment variables can be set either in your shell or in a project-root `.env` file. See [.env.example](/home/demon/workspace/weixin-plugin-cc-cx/.env.example).
@@ -57,7 +57,7 @@ Optional environment variables:
 Example:
 
 ```bash
-WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 npm run start
+WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 bun run start
 ```
 
 ### 2. Connect Claude Code
@@ -86,25 +86,25 @@ The Claude plugin process no longer polls WeChat by itself. It only proxies Clau
 
 ## First Run
 
-Prefer the npm entrypoints for setup and login. The cc skills remain available, but they are secondary.
+Prefer the bun entrypoints for setup and login. The cc skills remain available, but they are secondary.
 
-1. Start the daemon with `npm run start`
-2. Check current state with `npm run status`
-3. Trigger login with `npm run login`
+1. Start the daemon with `bun run start`
+2. Check current state with `bun run status`
+3. Trigger login with `bun run login`
 4. If Claude Code needs to reconnect its local proxy, run `/reload-plugins`
 5. The daemon prints a browser login link to stderr — open it in your browser and scan with WeChat within 8 minutes
 6. Session is saved under `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json` by default, or `WEIXIN_STATE_DIR` if set
 
-Use npm scripts for setup and login (no skill equivalent):
+Use bun scripts for setup and login (no skill equivalent):
 
 Useful CLI helpers:
 
 ```bash
-npm run status
-npm run relogin
-npm run clear
-npm run stop
-npm test
+bun run status
+bun run relogin
+bun run clear
+bun run stop
+bun test
 ```
 
 Useful WeChat commands:
@@ -119,11 +119,11 @@ Useful WeChat commands:
 When the session expires, the server stops polling and logs the error code. Run:
 
 ```
-npm run clear
-npm run login
+bun run clear
+bun run login
 ```
 
-Then `/reload-plugins` if Claude Code needs to reconnect. Use `npm run clear` and `npm run login` for session management.
+Then `/reload-plugins` if Claude Code needs to reconnect. Use `bun run clear` and `bun run login` for session management.
 
 ## Access Control
 
@@ -315,9 +315,9 @@ or `WEIXIN_STATE_DIR` if set:
 ## Development
 
 ```bash
-npm run typecheck
-npm test
-npm run build
+bun run typecheck
+bun test
+bun run build
 ```
 
 ## License

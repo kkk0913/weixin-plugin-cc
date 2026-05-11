@@ -35,7 +35,7 @@ cd weixin-plugin-cc-cx
 从本地仓库启动 daemon：
 
 ```bash
-npm run start
+bun run start
 ```
 
 可选环境变量既可以通过 shell 传入，也可以写在项目根目录的 `.env` 文件里。示例见 [.env.example](/home/demon/workspace/weixin-plugin-cc-cx/.env.example)。
@@ -57,7 +57,7 @@ npm run start
 示例：
 
 ```bash
-WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 npm run start
+WEIXIN_STATE_DIR=/path/to/state WEIXIN_CLAUDE_CONFIG_DIR=/home/me/.claude-official WEIXIN_CODEX_CWD=/path/to/repo WEIXIN_CODEX_MODEL=gpt-5.4 bun run start
 ```
 
 ### 2. 再连接 Claude Code
@@ -86,25 +86,25 @@ Claude 插件进程现在不会自己轮询微信，只负责通过本地 socket
 
 ## 首次使用
 
-启动和登录优先使用 npm 脚本。cc skill 仍可用，但作为次选入口。
+启动和登录优先使用 bun 脚本。cc skill 仍可用，但作为次选入口。
 
-1. 先运行 `npm run start` 启动守护进程
-2. 用 `npm run status` 检查当前状态
-3. 用 `npm run login` 触发登录
+1. 先运行 `bun run start` 启动守护进程
+2. 用 `bun run status` 检查当前状态
+3. 用 `bun run login` 触发登录
 4. 如果 Claude Code 需要重连本地代理，再执行 `/reload-plugins`
 5. 守护进程会输出一个浏览器登录链接，在浏览器中打开并用微信扫码（8 分钟内有效）
 6. 默认保存在 `${XDG_STATE_HOME:-~/.local/state}/weixin-plugin-cc-cx/account.json`，如果设置了 `WEIXIN_STATE_DIR` 则保存在该目录下
 
-使用 npm 脚本进行设置和登录（无 skill 等价命令）：
+使用 bun 脚本进行设置和登录（无 skill 等价命令）：
 
 常用 CLI 命令：
 
 ```bash
-npm run status
-npm run relogin
-npm run clear
-npm run stop
-npm test
+bun run status
+bun run relogin
+bun run clear
+bun run stop
+bun test
 ```
 
 常用微信命令：
@@ -119,11 +119,11 @@ npm test
 会话过期时，服务会停止轮询并记录错误码。执行：
 
 ```
-npm run clear
-npm run login
+bun run clear
+bun run login
 ```
 
-如果 Claude Code 需要重连，再执行 `/reload-plugins`。会话管理请使用 `npm run clear` 和 `npm run login`。
+如果 Claude Code 需要重连，再执行 `/reload-plugins`。会话管理请使用 `bun run clear` 和 `bun run login`。
 
 ## 访问控制
 
@@ -315,9 +315,9 @@ skills/
 ## 开发
 
 ```bash
-npm run typecheck
-npm test
-npm run build
+bun run typecheck
+bun test
+bun run build
 ```
 
 ## 许可证
