@@ -22,6 +22,7 @@ export interface InboundRouterOptions {
   backendRoutes: BackendRouteControl;
   sessionState: {
     setContextToken: (userId: string, token: string) => void;
+    getContextToken: (userId: string) => string | undefined;
   };
   sendTextMessage: (chatId: string, contextToken: string, text: string) => Promise<void>;
   getStatsText: () => Promise<string>;
@@ -58,6 +59,7 @@ export function createInboundRouter(options: InboundRouterOptions): (msg: Weixin
     }
 
     options.sessionState.setContextToken(userId, msg.context_token);
+    options.debug(`context-token: update peer=${userId} len=${msg.context_token.length}`);
     options.backendRoutes.reload();
     const activeBackend = options.backendRoutes.getBackend(userId);
     options.debug(`handleInbound: backend=${activeBackend}`);

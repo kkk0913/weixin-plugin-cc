@@ -38,7 +38,7 @@ export interface FileItem {
   media: CDNMedia;
   file_name?: string;
   md5?: string;
-  len?: number;
+  len?: string;
 }
 
 export interface VideoItem {

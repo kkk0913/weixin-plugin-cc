@@ -12,7 +12,8 @@ WeChat bridge for Claude Code and Codex.
 
 - **QR code login** — scan to login, session saved and auto-restored across restarts
 - **Long-poll message delivery** — real-time WeChat message bridging
-- **Media support** — send/receive images, video, files (up to 50MB)
+- **Media support** — send/receive images and files (up to 50MB), including `mp3`, `mp4`, `wav`, `m4a` and similar media files as regular file attachments
+- **Current limitation** — `voice_item` and `video_item` are not supported yet
 - **Access control** — pairing mode (default), allowlist, or disabled
 - **Auto-chunking** — long replies split at WeChat's ~2048 char limit
 - **Permission relay** — approve/deny Claude Code tool permissions from WeChat
@@ -179,6 +180,13 @@ These skills are optional terminal shortcuts, not the primary workflow.
 | `react` | Not supported (WeChat has no emoji reactions) |
 | `download_attachment` | Download an inbound media file to local inbox |
 | `edit_message` | Send a replacement message (WeChat has no edit API) |
+
+### Media Support Notes
+
+- Supported outbound media: `image_item`, `file_item`
+- `mp3`, `mp4`, `wav`, `m4a` and similar media files are sent via `file_item` by default
+- `voice_item` is currently not supported
+- `video_item` is currently not supported
 
 ## Flow
 

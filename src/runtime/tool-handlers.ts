@@ -1,5 +1,6 @@
 import { statSync } from 'node:fs';
-import { downloadMedia, uploadMedia } from '../weixin/media.js';
+import { basename } from 'node:path';
+import { downloadMedia, uploadMedia, uploadMediaDetailed } from '../weixin/media.js';
 import { MessageType, type CDNMedia, type MessageItem } from '../weixin/types.js';
 import type {
   BridgePermissionRequestParams,
@@ -28,6 +29,7 @@ export interface ToolHandlersOptions {
   takeMediaHandle: (handle: string) => CDNMedia | null;
   client: {
     sendMessage: (chatId: string, contextToken: string, item: MessageItem) => Promise<unknown>;
+    sendMessageItems?: (chatId: string, contextToken: string, items: MessageItem[]) => Promise<unknown>;
   };
   access: {
     reload: () => void;
@@ -113,7 +115,7 @@ export class ClaudeToolHandlers {
           const files = (args.files as string[] | undefined) ?? [];
           this.options.assertAllowedChat(chatId);
 
-          const chunks = chunkText(text, this.options.maxChunkLimit);
+          const chunks = text ? chunkText(text, this.options.maxChunkLimit) : [];
           for (const chunk of chunks) {
             await this.options.client.sendMessage(chatId, this.options.getContextToken(chatId) ?? '', {
               type: MessageType.TEXT,
@@ -127,21 +129,44 @@ export class ClaudeToolHandlers {
             if (st.size > 50 * 1024 * 1024) {
               throw new Error(`file too large: ${filePath} (${(st.size / 1024 / 1024).toFixed(1)}MB, max 50MB)`);
             }
+            const fileName = basename(filePath);
             const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
             const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext);
-            const isVideo = ['mp4', 'avi', 'mov', 'mkv'].includes(ext);
-            const mediaType = isImage ? 1 : isVideo ? 2 : 3;
-            const cdnMedia = await uploadMedia(filePath, chatId, mediaType, this.options.client as any);
-
+            const mediaType = isImage ? 1 : 3;
             let item: MessageItem;
             if (isImage) {
-              item = { type: MessageType.IMAGE, image_item: { media: cdnMedia } };
-            } else if (isVideo) {
-              item = { type: MessageType.VIDEO, video_item: { media: cdnMedia } };
+              const upload = await uploadMediaDetailed(filePath, chatId, mediaType, this.options.client as any, this.options.debug);
+              item = {
+                type: MessageType.IMAGE,
+                image_item: {
+                  media: upload.media,
+                  mid_size: upload.paddedSize,
+                },
+              };
             } else {
-              item = { type: MessageType.FILE, file_item: { media: cdnMedia, file_name: filePath.split('/').pop() } };
+              const upload = await uploadMediaDetailed(filePath, chatId, mediaType, this.options.client as any, this.options.debug);
+              item = {
+                type: MessageType.FILE,
+                file_item: {
+                  media: upload.media,
+                  file_name: fileName,
+                  md5: upload.encryptedMd5,
+                  len: String(upload.paddedSize),
+                },
+              };
             }
-            await this.options.client.sendMessage(chatId, this.options.getContextToken(chatId) ?? '', item);
+            const contextToken = this.options.getContextToken(chatId) ?? '';
+            if (item.type === MessageType.FILE && this.options.client.sendMessageItems) {
+              await this.options.client.sendMessageItems(chatId, contextToken, [
+                {
+                  type: MessageType.TEXT,
+                  text_item: { text: `附件：${fileName}` },
+                },
+                item,
+              ]);
+            } else {
+              await this.options.client.sendMessage(chatId, contextToken, item);
+            }
           }
 
           return { content: [{ type: 'text', text: `sent${chunks.length > 1 ? ` (${chunks.length} chunks)` : ''}` }] };

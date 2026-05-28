@@ -17,7 +17,6 @@ export class CommandService {
   private readonly sendTextMessage: (chatId: string, contextToken: string, text: string) => Promise<void>;
   private readonly getStatsText: () => Promise<string>;
   private readonly getStatusText: (chatId: string) => Promise<string>;
-
   constructor(options: CommandServiceOptions) {
     this.debug = options.debug;
     this.sendTextMessage = options.sendTextMessage;

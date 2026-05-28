@@ -10,3 +10,4 @@ export const LOG_FILE = join(STATE_DIR, 'debug.log');
 export const AUTO_APPROVE_FILE = join(STATE_DIR, '.auto-approve');
 export const BRIDGE_SOCKET_FILE = join(STATE_DIR, 'daemon.sock');
 export const USAGE_CACHE_FILE = join(STATE_DIR, '.usage-cache.json');
+export const CONTEXT_TOKENS_FILE = join(STATE_DIR, '.context-tokens.json');

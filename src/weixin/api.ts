@@ -179,6 +179,17 @@ export class WeixinClient {
     contextToken: string,
     item: MessageItem,
   ): Promise<SendMessageResp> {
+    return this.sendMessageItems(toUserId, contextToken, [item]);
+  }
+
+  /**
+   * Send a message with multiple items to a user.
+   */
+  async sendMessageItems(
+    toUserId: string,
+    contextToken: string,
+    items: MessageItem[],
+  ): Promise<SendMessageResp> {
     const { randomUUID } = await import('node:crypto');
     const msg: Record<string, unknown> = {
       from_user_id: '',
@@ -186,7 +197,7 @@ export class WeixinClient {
       client_id: randomUUID(),
       message_type: 2, // BOT
       message_state: 2, // FINISH
-      item_list: [item],
+      item_list: items,
     };
     if (contextToken) {
       msg.context_token = contextToken;

@@ -41,6 +41,34 @@ function detectFileExtension(data: Buffer): string {
   return '.bin';
 }
 
+function extractEncryptQueryParam(
+  uploadResp: { upload_param?: string; upload_full_url?: string },
+  responseHeaderValue?: string | null,
+): string {
+  if (responseHeaderValue) {
+    return responseHeaderValue;
+  }
+  if (uploadResp.upload_param) {
+    try {
+      const uploadParam = JSON.parse(uploadResp.upload_param) as { encrypt_query_param?: string };
+      if (uploadParam.encrypt_query_param) {
+        return uploadParam.encrypt_query_param;
+      }
+    } catch {
+      // Fall through to upload_full_url parsing.
+    }
+  }
+
+  if (uploadResp.upload_full_url) {
+    const url = new URL(uploadResp.upload_full_url);
+    return url.searchParams.get('encrypted_query_param')
+      ?? url.searchParams.get('encrypt_query_param')
+      ?? '';
+  }
+
+  return '';
+}
+
 /** Maps MessageType → MediaType */
 export function messageItemToMediaType(type: number): MediaTypeValue {
   switch (type) {
@@ -52,25 +80,36 @@ export function messageItemToMediaType(type: number): MediaTypeValue {
   }
 }
 
+export interface UploadMediaResult {
+  media: CDNMedia;
+  rawSize: number;
+  paddedSize: number;
+  rawMd5: string;
+  encryptedMd5: string;
+  uploadMethod: 'PUT' | 'POST';
+}
+
 /**
  * Upload a local file to WeChat CDN.
  * Returns a CDNMedia reference for embedding in a MessageItem.
  */
-export async function uploadMedia(
+export async function uploadMediaDetailed(
   filePath: string,
   toUserId: string,
   mediaType: MediaTypeValue,
   client: WeixinClient,
-): Promise<CDNMedia> {
+  debug?: (msg: string) => void,
+): Promise<UploadMediaResult> {
   const fileData = readFileSync(filePath);
   const aesKey = generateAesKey();
   const fileKey = generateFileKey();
   const rawSize = fileData.length;
-  const md5 = createHash('md5').update(fileData).digest('hex');
+  const rawMd5 = createHash('md5').update(fileData).digest('hex');
   const paddedSize = aesEcbPaddedSize(rawSize);
 
   // Encrypt file data
   const encrypted = encryptAesEcb(fileData, aesKey);
+  const encryptedMd5 = createHash('md5').update(encrypted).digest('hex');
 
   // Get upload URL
   const uploadResp = await client.getUploadUrl({
@@ -78,33 +117,60 @@ export async function uploadMedia(
     media_type: mediaType,
     to_user_id: toUserId,
     rawsize: rawSize,
-    rawfilemd5: md5,
+    rawfilemd5: rawMd5,
     filesize: paddedSize,
     aeskey: aesKey,
     no_need_thumb: true,
   });
 
-  // Upload to CDN
-  const uploadParam = JSON.parse(uploadResp.upload_param);
   const uploadUrl = uploadResp.upload_full_url;
-
-  const form = new FormData();
-  form.append('file', new Blob([new Uint8Array(encrypted)]), uploadParam.name ?? 'file');
-
-  const resp = await fetch(uploadUrl, {
-    method: 'POST',
-    body: form,
-  });
-
-  if (!resp.ok) {
-    throw new Error(`CDN upload failed: HTTP ${resp.status}`);
+  if (!uploadUrl) {
+    throw new Error('CDN upload failed: missing upload_full_url');
   }
 
-  return {
-    encrypt_query_param: uploadParam.encrypt_query_param ?? '',
-    aes_key: Buffer.from(aesKey, 'hex').toString('base64'),
-    encrypt_type: 0,
+  // Current Weixin gateway returns a direct CDN upload URL. In practice the
+  // CDN accepts POST uploads for file payloads even when upload_param is
+  // omitted, so derive encrypt_query_param from either the legacy upload_param
+  // JSON or the upload URL itself.
+  const requestInit = {
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(encrypted.length),
+    },
+    body: new Uint8Array(encrypted),
+  } satisfies RequestInit;
+
+  let uploadMethod: 'PUT' | 'POST' = 'PUT';
+  let resp = await fetch(uploadUrl, { ...requestInit, method: uploadMethod });
+  if (!resp.ok) {
+    debug?.(`uploadMedia: PUT failed user=${toUserId} mediaType=${mediaType} status=${resp.status}, retrying POST`);
+    uploadMethod = 'POST';
+    resp = await fetch(uploadUrl, { ...requestInit, method: uploadMethod });
+  }
+
+  if (!resp.ok) {
+    throw new Error(`CDN upload failed: HTTP ${resp.status} (${uploadMethod})`);
+  }
+
+  const media: CDNMedia = {
+    encrypt_query_param: extractEncryptQueryParam(uploadResp, resp.headers.get('x-encrypted-param')),
+    // Match the observed openclaw-weixin outbound shape: base64(hex string),
+    // not base64(raw 16 bytes).
+    aes_key: Buffer.from(aesKey, 'utf8').toString('base64'),
+    encrypt_type: 1,
   };
+  return { media, rawSize, paddedSize, rawMd5, encryptedMd5, uploadMethod };
+}
+
+export async function uploadMedia(
+  filePath: string,
+  toUserId: string,
+  mediaType: MediaTypeValue,
+  client: WeixinClient,
+  debug?: (msg: string) => void,
+): Promise<CDNMedia> {
+  const result = await uploadMediaDetailed(filePath, toUserId, mediaType, client, debug);
+  return result.media;
 }
 
 /**

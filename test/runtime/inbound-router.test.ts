@@ -70,6 +70,7 @@ test('inbound router dispatches normal chat to active backend', async () => {
     } as any,
     sessionState: {
       setContextToken: () => {},
+      getContextToken: () => 'ctx-1',
     },
     sendTextMessage: async (_chatId, _contextToken, text) => {
       sentTexts.push(text);
@@ -116,6 +117,7 @@ test('inbound router handles backend switch before delivery', async () => {
     } as any,
     sessionState: {
       setContextToken: () => {},
+      getContextToken: () => 'ctx-1',
     },
     sendTextMessage: async (_chatId, _contextToken, text) => {
       sentTexts.push(text);
@@ -161,6 +163,7 @@ test('inbound router routes stats command to text response', async () => {
     } as any,
     sessionState: {
       setContextToken: () => {},
+      getContextToken: () => 'ctx-1',
     },
     sendTextMessage: async (_chatId, _contextToken, text) => {
       sentTexts.push(text);
@@ -203,6 +206,7 @@ test('inbound router routes status command to text response', async () => {
     } as any,
     sessionState: {
       setContextToken: () => {},
+      getContextToken: () => 'ctx-1',
     },
     sendTextMessage: async (_chatId, _contextToken, text) => {
       sentTexts.push(text);
@@ -244,6 +248,7 @@ test('inbound router stops when approval reply is consumed', async () => {
     } as any,
     sessionState: {
       setContextToken: () => {},
+      getContextToken: () => 'ctx-1',
     },
     sendTextMessage: async () => {},
     getStatsText: async () => 'stats-output',

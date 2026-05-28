@@ -16,6 +16,7 @@ import {
   ACCOUNT_FILE,
   AUTO_APPROVE_FILE,
   BRIDGE_SOCKET_FILE,
+  CONTEXT_TOKENS_FILE,
   CURSOR_FILE,
   INBOX_DIR,
   LOGIN_TRIGGER_FILE,
@@ -49,6 +50,8 @@ const pollLease = new PollLeaseControl(STATE_DIR, {
 const sessionState = new SessionState({
   mediaHandleTtlMs: MEDIA_HANDLE_TTL_MS,
   contextTokenTtlMs: CONTEXT_TOKEN_TTL_MS,
+  contextTokenFile: CONTEXT_TOKENS_FILE,
+  getContextTokenScope: () => client.userId ?? undefined,
 });
 const autoApproveFlag = new FlagFile(AUTO_APPROVE_FILE);
 
@@ -90,6 +93,37 @@ function resetSessionAutoApprove(): void {
   autoApproveFlag.disable();
 }
 
+function resolveContextToken(chatId: string, fallback = ''): string {
+  const stored = sessionState.getContextToken(chatId);
+  return stored ?? fallback;
+}
+
+async function sendStartupOnlineNotice(): Promise<void> {
+  access.reload();
+  const allowedUsers = new Set(access.allowedUsers);
+  for (const chatId of sessionState.listContextTokenUsers()) {
+    if (!allowedUsers.has(chatId)) {
+      debugLog(`startup notice: skip peer=${chatId} reason=not-allowed`);
+      continue;
+    }
+    const contextToken = sessionState.getContextToken(chatId);
+    if (!contextToken) {
+      debugLog(`startup notice: skip peer=${chatId} reason=no-context-token`);
+      continue;
+    }
+    try {
+      debugLog(`startup notice: send peer=${chatId}`);
+      await client.sendMessage(chatId, contextToken, {
+        type: MessageType.TEXT,
+        text_item: { text: 'Hi, weixin-cli 已上线' },
+      });
+      debugLog(`startup notice: sent peer=${chatId}`);
+    } catch (err) {
+      debugLog(`startup notice: failed peer=${chatId} err=${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
 function assertAllowedChat(chatId: string): void {
   access.reload();
   const result = access.gate(chatId);
@@ -99,7 +133,7 @@ function assertAllowedChat(chatId: string): void {
 }
 
 async function sendTextMessage(chatId: string, contextToken: string, text: string): Promise<void> {
-  await client.sendMessage(chatId, contextToken, {
+  await client.sendMessage(chatId, resolveContextToken(chatId, contextToken), {
     type: MessageType.TEXT,
     text_item: { text },
   });
@@ -266,12 +300,14 @@ export async function runWeixinDaemon(): Promise<void> {
       process.stderr.write('weixin channel: saved session is older than 6 days, may need re-login\n');
     }
     process.stderr.write('weixin channel: starting message poll\n');
+    await sendStartupOnlineNotice();
     await loginManager.runWithAutoReLogin(() => pollingService.run(), pollRuntimeState);
   } else {
     await loginManager.waitForLoginTrigger();
     try {
       await loginManager.startBrowserLogin();
       process.stderr.write('weixin channel: login complete, starting message poll\n');
+      await sendStartupOnlineNotice();
       await loginManager.runWithAutoReLogin(() => pollingService.run(), pollRuntimeState);
     } catch (err) {
       process.stderr.write(`weixin channel: login failed: ${err}\n`);
@@ -285,6 +321,7 @@ export async function runWeixinDaemon(): Promise<void> {
       await loginManager.startBrowserLogin();
       process.stderr.write('weixin channel: login complete, starting message poll\n');
       lifecycleState.polling = true;
+      await sendStartupOnlineNotice();
       await loginManager.runWithAutoReLogin(() => pollingService.run(), pollRuntimeState);
     } catch (err) {
       process.stderr.write(`weixin channel: login failed: ${err}\n`);
