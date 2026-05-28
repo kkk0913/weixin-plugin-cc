@@ -85,6 +85,7 @@ export async function pollLoop(options: PollLoopOptions): Promise<void> {
 
       const msgs = resp.msgs ?? [];
       options.debug(`poll: got ${msgs.length} msg(s), ret=${resp.ret}, errcode=${resp.errcode}`);
+      const perChatPromises = new Map<string, Promise<void>>();
       for (const msg of msgs) {
         if (msg.message_type === 2) {
           options.debug(`skip bot msg type=${msg.message_type}`);
@@ -95,7 +96,22 @@ export async function pollLoop(options: PollLoopOptions): Promise<void> {
           ? `type=${firstItem.type} text=${firstItem.text_item?.text ?? firstItem.voice_item?.text ?? '(none)'}`
           : 'no items';
         options.debug(`processing msg from ${msg.from_user_id}, ${itemSummary}`);
-        await options.handleInbound(msg);
+        const previous = perChatPromises.get(msg.from_user_id) ?? Promise.resolve();
+        const next = previous
+          .catch(() => {
+            // Preserve later messages in the same chat even if an earlier one failed.
+          })
+          .then(async () => {
+            try {
+              await options.handleInbound(msg);
+            } catch (err) {
+              options.debug(`handleInbound failed for ${msg.from_user_id}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          });
+        perChatPromises.set(msg.from_user_id, next);
+      }
+      if (perChatPromises.size > 0) {
+        await Promise.all(perChatPromises.values());
       }
     } catch (err) {
       consecutiveErrors++;

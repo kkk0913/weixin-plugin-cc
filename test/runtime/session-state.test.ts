@@ -105,6 +105,7 @@ test('SessionState does not rewrite persisted tokens on read refresh', async () 
       getContextTokenScope: () => 'account-a',
     });
     state.setContextToken('user-1', 'ctx-a1');
+    await new Promise(resolve => setTimeout(resolve, 300));
     const before = readFileSync(file, 'utf-8');
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(state.getContextToken('user-1'), 'ctx-a1');
@@ -148,6 +149,32 @@ test('SessionState lists users for current account scope only', () => {
     });
     assert.deepEqual(stateARestore.listContextTokenUsers().sort(), ['user-1', 'user-2']);
     stateARestore.dispose();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('SessionState debounces context token persistence on repeated writes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'weixin-session-state-'));
+  const file = join(dir, 'context-tokens.json');
+
+  try {
+    const state = new SessionState({
+      mediaHandleTtlMs: 50,
+      contextTokenTtlMs: 1000,
+      contextTokenFile: file,
+      getContextTokenScope: () => 'account-a',
+    });
+
+    state.setContextToken('user-1', 'ctx-a1');
+    state.setContextToken('user-1', 'ctx-a2');
+    state.setContextToken('user-1', 'ctx-a3');
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const persisted = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, { token: string }>;
+    assert.equal(persisted['account-a:user-1'].token, 'ctx-a3');
+
+    state.dispose();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

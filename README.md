@@ -12,6 +12,7 @@ WeChat bridge for Claude Code and Codex.
 
 - **QR code login** — scan to login, session saved and auto-restored across restarts
 - **Long-poll message delivery** — real-time WeChat message bridging
+- **Scoped context-token persistence** — restore the latest `context_token` per WeChat account + peer across restarts
 - **Media support** — send/receive images and files (up to 50MB), including `mp3`, `mp4`, `wav`, `m4a` and similar media files as regular file attachments
 - **Current limitation** — `voice_item` and `video_item` are not supported yet
 - **Access control** — pairing mode (default), allowlist, or disabled
@@ -187,6 +188,11 @@ These skills are optional terminal shortcuts, not the primary workflow.
 - `mp3`, `mp4`, `wav`, `m4a` and similar media files are sent via `file_item` by default
 - `voice_item` is currently not supported
 - `video_item` is currently not supported
+
+### Runtime Notes
+
+- `context_token` is persisted per WeChat account + peer and automatically reused on outbound replies
+- inbound polling preserves message order within the same WeChat chat while allowing different chats to process in parallel
 
 ## Flow
 

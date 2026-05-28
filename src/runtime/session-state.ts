@@ -28,6 +28,8 @@ export class SessionState {
   private readonly contextTokens = new Map<string, ContextTokenEntry>();
   private readonly mediaHandleEvictionTimer: ReturnType<typeof setInterval>;
   private readonly contextTokenEvictionTimer: ReturnType<typeof setInterval>;
+  private readonly contextTokenPersistDelayMs = 250;
+  private contextTokenPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: SessionStateOptions) {
     this.mediaHandleTtlMs = options.mediaHandleTtlMs;
@@ -68,7 +70,7 @@ export class SessionState {
       token,
       expiresAt: Date.now() + this.contextTokenTtlMs,
     });
-    this.persistContextTokens();
+    this.schedulePersistContextTokens();
   }
 
   getContextToken(userId: string): string | undefined {
@@ -80,7 +82,7 @@ export class SessionState {
     }
     if (entry.expiresAt <= now) {
       this.contextTokens.delete(key);
-      this.persistContextTokens();
+      this.persistContextTokensNow();
       return undefined;
     }
     entry.expiresAt = now + this.contextTokenTtlMs;
@@ -102,6 +104,11 @@ export class SessionState {
   dispose(): void {
     clearInterval(this.mediaHandleEvictionTimer);
     clearInterval(this.contextTokenEvictionTimer);
+    if (this.contextTokenPersistTimer) {
+      clearTimeout(this.contextTokenPersistTimer);
+      this.contextTokenPersistTimer = null;
+    }
+    this.persistContextTokensNow();
   }
 
   private pruneExpiredMediaHandles(now = Date.now()): void {
@@ -121,7 +128,7 @@ export class SessionState {
       }
     }
     if (changed) {
-      this.persistContextTokens();
+      this.persistContextTokensNow();
     }
   }
 
@@ -153,7 +160,18 @@ export class SessionState {
     }
   }
 
-  private persistContextTokens(): void {
+  private schedulePersistContextTokens(): void {
+    if (this.contextTokenPersistTimer) {
+      return;
+    }
+    this.contextTokenPersistTimer = setTimeout(() => {
+      this.contextTokenPersistTimer = null;
+      this.persistContextTokensNow();
+    }, this.contextTokenPersistDelayMs);
+    this.contextTokenPersistTimer.unref?.();
+  }
+
+  private persistContextTokensNow(): void {
     if (!this.contextTokenFile) {
       return;
     }
